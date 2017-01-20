@@ -1108,9 +1108,9 @@ import utils
 #         #     print x[b][ch].reshape((23,23)).astype(int)
 
 
-x = 27
+x = 23
 for i in range(5):
-    x = int(float(x) / 1.7)
+    x = int(float(x) / 1.5)
     print x
 
 
@@ -1205,7 +1205,7 @@ for i in range(5):
 #                 X[b][ch_idx, map_idx] = 0.
 #         return X
 #
-#     def _add_cross_ch(self, X, percent, block_list):
+#     def _add_cross_ch_ae(self, X, percent, block_list):
 #         assert X.ndim == 3
 #         equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
 #         for blockr, blockc in block_list:
@@ -1239,9 +1239,9 @@ for i in range(5):
 #             X[ch_idx, map_idx] = 0.
 #         return X
 #
-#     def apply(self, X, percent, block_list, mode, retain):
+#     def apply_for_omap(self, X, percent, block_list, mode, retain):
 #         assert X.ndim == 4
-#         add_fn = {'permap': self._add_per_map, 'channel': self._add_cross_ch, 'batch': self._add_cross_batch}
+#         add_fn = {'permap': self._add_per_map, 'channel': self._add_cross_ch_ae, 'batch': self._add_cross_batch}
 #         if mode not in add_fn.keys():
 #             raise NotImplementedError
 #         Xshape = X.shape
@@ -1258,7 +1258,7 @@ for i in range(5):
 # # retain是保持加噪的比例,即1-retain的比例不加噪
 # def add_mn_array(X, percent=0.5, block_list=((1, 1), (2, 2)), mode='channel', retain=0.5):
 #     assert X.ndim == 4
-#     X = MNArray().apply(X, percent, block_list, mode, retain)
+#     X = MNArray().apply_for_omap(X, percent, block_list, mode, retain)
 #     return X
 #
 # x = np.ones((5, 36, 23, 23))
@@ -1415,7 +1415,7 @@ for i in range(5):
 #             orient_idx_allch.append((orient_idx))
 #         return orient_idx_allch
 #
-#     def _add_cross_ch(self, X, percent, block_list):
+#     def _add_cross_ch_ae(self, X, percent, block_list):
 #         assert X.ndim == 3
 #         equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
 #         for blockr, blockc in block_list:
@@ -1433,7 +1433,7 @@ for i in range(5):
 #                 pass
 #         return X
 #
-#     def apply(self, X, pad, stride, percent, block_list, p_add, p_center, center_vs_around):
+#     def apply_for_omap(self, X, pad, stride, percent, block_list, p_add, p_center, center_vs_around):
 #         assert X.ndim == 4
 #         Xshape = X.shape
 #         self.batches, self.channels, self.orows, self.ocols = Xshape
@@ -1454,7 +1454,7 @@ for i in range(5):
 #         self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
 #         X = X.reshape((self.batches, self.channels, -1))
 #         block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-#         X = self._add_cross_ch(X, percent, block_list)
+#         X = self._add_cross_ch_ae(X, percent, block_list)
 #         X = X.reshape(Xshape)
 #         return X
 #
@@ -1463,7 +1463,7 @@ for i in range(5):
 # def add_mn_array_orient(X, pad, stride, percent=0.5, block_list=((1, 1),),
 #                         p_add=0.5, p_center=0.5, center_vs_around=0.5):
 #     assert X.ndim == 4
-#     X = MNArrayOrient().apply(X, pad, stride, percent, block_list, p_add, p_center, center_vs_around)
+#     X = MNArrayOrient().apply_for_omap(X, pad, stride, percent, block_list, p_add, p_center, center_vs_around)
 #     return X
 #
 # x = np.ones((5, 36, 6, 6))
@@ -1504,4 +1504,12 @@ for i in range(5):
 # pylab.imshow(y, interpolation=None)
 # pylab.show()
 
-from skimage.feature._canny import smooth_with_function_and_mask
+# x=np.arange(1*49*9)
+# print x.reshape((1,49,3,3))
+# x=x.reshape((1,49,9)).transpose((0,2,1)).reshape((1,9,7,7))
+# x[:,1,1:3,1:3]=0
+# x[:,4,3:6,3:6]=0
+# x[:,7,3:5,3:5]=0
+# print x
+# x=x.reshape((1,9,49)).transpose((0,2,1))
+# print x.reshape((1,49,3,3))

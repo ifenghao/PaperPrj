@@ -8,6 +8,7 @@ from util import *
 __all__ = ['add_noise_decomp']
 
 
+# 统一X的输入维度(batches,orows,ocols,filter_size,filter_size)
 def add_noise_decomp(X, noise_type, args):
     noise_dict = {'mn': add_mn, 'gs': add_gs, 'sp': add_sp, 'gs_part': add_gs_part, 'mn_gs': add_mn_gs,
                   'mn_block': add_mn_block, 'mn_block_mch': add_mn_block_mch,
@@ -276,154 +277,141 @@ def assign_onemap_idx_alter(arrayr, arrayc, n_blocks, p_center_of_image=0.5, p_c
 # 对每张orows*ocols的图的中心或者周围加噪blockr*blockc
 # 由于orows*ocols的图中目标的位置都有平移,区分中心和四周并没有意义
 class MNArray(object):
+    def __init__(self, mode, p_add, map_mode, p_center_of_image, p_center_of_block):
+        # 添加方式
+        add_fn = {'permap': self._add_per_map, 'channel': self._add_cross_ch,
+                  'batch': self._add_cross_batch}
+        if mode not in add_fn.keys(): raise NotImplementedError
+        self.add_mn = add_fn[mode]
+        if mode == 'permap':
+            self.add_args = {}
+        elif mode in ('channel', 'batch'):
+            self.add_args = {'p_add': p_add,}
+        # 图索引方式
+        map_fn = {'uniform': assign_onemap_idx_uniform, 'around': assign_onemap_idx_around,
+                  'center': assign_onemap_idx_center, 'alter': assign_onemap_idx_alter}
+        if map_mode not in map_fn.keys(): raise NotImplementedError
+        self.assign_onemap_idx = map_fn[map_mode]
+        if map_mode == 'uniform':
+            self.map_args = {}
+        elif map_mode in ('around', 'center'):
+            self.map_args = {'p_center_of_image': p_center_of_image,}
+        elif map_mode == 'alter':
+            self.map_args = {'p_center_of_image': p_center_of_image, 'p_center_of_block': p_center_of_block}
+
     def _add_per_map(self, X, percent, block_list):
-        assert X.ndim == 3
-        equal_size = self.orows * self.ocols * percent / float(len(block_list))
+        assert X.ndim == 4
+        Xshape = X.shape
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches, channels, -1))
+        equal_size = rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             map_blocks = int(round(equal_size / (blockr * blockc)))
-            total_blocks = self.channels * map_blocks
-            arrayr = (self.orows - blockr) // 1 + 1
-            arrayc = (self.ocols - blockc) // 1 + 1
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            for b in xrange(self.batches):  # 不同样本不同噪声
-                ch_idx = assign_ch_idx_permap(self.channels, map_blocks)
+            total_blocks = channels * map_blocks
+            arrayr = (rows - blockr) // 1 + 1
+            arrayc = (cols - blockc) // 1 + 1
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_permap(channels, map_blocks)
                 idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
                 ch_idx = np.repeat(ch_idx, blockr * blockc)
                 map_idx = array_idx[idx_for_array_idx].ravel()
                 X[b][ch_idx, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
     def _add_cross_ch(self, X, percent, block_list):
-        assert X.ndim == 3
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
+        assert X.ndim == 4
+        Xshape = X.shape
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches, channels, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             total_blocks = int(round(equal_size / (blockr * blockc)))
-            arrayr = (self.orows - blockr) // 1 + 1  # 不考虑边界
-            arrayc = (self.ocols - blockc) // 1 + 1
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            for b in xrange(self.batches):  # 不同样本不同噪声
-                ch_idx = assign_ch_idx_partial_uniform(self.channels, total_blocks, **self.add_args)
+            arrayr = (rows - blockr) // 1 + 1  # 不考虑边界
+            arrayc = (cols - blockc) // 1 + 1
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_partial_uniform(channels, total_blocks, **self.add_args)
                 idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
                 ch_idx = np.repeat(ch_idx, blockr * blockc)
                 map_idx = array_idx[idx_for_array_idx].ravel()
                 X[b][ch_idx, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
     def _add_cross_batch(self, X, percent, block_list):
-        assert X.ndim == 3
-        X = X.reshape((-1, self.orows * self.ocols))
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
+        assert X.ndim == 4
+        Xshape = X.shape
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches * channels, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             total_blocks = int(round(equal_size / (blockr * blockc)))
-            arrayr = (self.orows - blockr) // 1 + 1  # 不考虑边界
-            arrayc = (self.ocols - blockc) // 1 + 1
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            channels = self.batches * self.channels
-            total_blocks *= self.batches
+            arrayr = (rows - blockr) // 1 + 1  # 不考虑边界
+            arrayc = (cols - blockc) // 1 + 1
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            channels = batches * channels
+            total_blocks *= batches
             ch_idx = assign_ch_idx_partial_uniform(channels, total_blocks, **self.add_args)
             idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
             ch_idx = np.repeat(ch_idx, blockr * blockc)
             map_idx = array_idx[idx_for_array_idx].ravel()
             X[ch_idx, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
-    def apply(self, X, percent, block_list, mode, p_add, map_mode, p_center_of_image, p_center_of_block):
-        assert X.ndim == 4
-        # 添加方式
-        add_fn = {'permap': self._add_per_map, 'channel': self._add_cross_ch,
-                  'batch': self._add_cross_batch}
-        if mode not in add_fn.keys(): raise NotImplementedError
-        if mode == 'permap':
-            self.add_args = {}
-        elif mode in ('channel', 'batch'):
-            self.add_args = {'p_add': p_add,}
-        # 图索引方式
-        map_fn = {'uniform': assign_onemap_idx_uniform, 'around': assign_onemap_idx_around,
-                  'center': assign_onemap_idx_center, 'alter': assign_onemap_idx_alter}
-        if map_mode not in map_fn.keys(): raise NotImplementedError
-        self.assign_onemap_idx = map_fn[map_mode]
-        if map_mode == 'uniform':
-            self.map_args = {}
-        elif map_mode in ('around', 'center'):
-            self.map_args = {'p_center_of_image': p_center_of_image,}
-        elif map_mode == 'alter':
-            self.map_args = {'p_center_of_image': p_center_of_image, 'p_center_of_block': p_center_of_block}
+    def apply_for_omap(self, X, percent, block_list):
+        assert X.ndim == 5
         Xshape = X.shape
-        self.batches, self.channels, self.orows, self.ocols = Xshape
-        self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
-        X = X.reshape((self.batches, self.channels, -1))
-        block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-        X = add_fn[mode](X, percent, block_list)
+        batches, orows, ocols, frows, fcols = Xshape
+        self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
+        X = X.reshape((batches, orows, ocols, -1)).transpose((0, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
+        X = self.add_mn(X, percent, block_list)
+        X = X.transpose((0, 2, 3, 1)).reshape(Xshape)
+        return X
+
+    def apply_for_patch(self, X, percent, block_list):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, orows, ocols, frows, fcols = Xshape
+        self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
+        X = X.reshape((batches, -1, frows, fcols))
+        block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
+        X = self.add_mn(X, percent, block_list)
         X = X.reshape(Xshape)
+        return X
+
+    def apply_for_cccp(self, X, percent, block_list):
+        assert X.ndim == 4
+        Xshape = X.shape
+        batches, rows, cols, channels = Xshape
+        self.idx_map = np.arange(rows * cols).reshape((1, 1, rows, cols))
+        X = X.transpose((0, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= rows and x[1] <= cols, block_list)
+        X = self.add_mn(X, percent, block_list)
+        X = X.transpose((0, 2, 3, 1))
         return X
 
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪,p_center是中心区域面积的比例
 def add_mn_array(X, percent=0.5, block_list=((1, 1),), mode='channel', p_add=0.5,
-                 map_mode='uniform', p_center_of_image=0.5, p_center_of_block=0.5):
-    assert X.ndim == 4
-    X = MNArray().apply(X, percent, block_list, mode, p_add, map_mode, p_center_of_image, p_center_of_block)
+                 map_mode='uniform', p_center_of_image=0.5, p_center_of_block=0.5, apply_mode='omap'):
+    mna = MNArray(mode, p_add, map_mode, p_center_of_image, p_center_of_block)
+    apply_fn = {'omap': mna.apply_for_omap, 'patch': mna.apply_for_patch, 'cccp': mna.apply_for_cccp}
+    if apply_mode not in apply_fn.keys(): raise NotImplementedError
+    X = apply_fn[apply_mode](X, percent, block_list)
     return X
 
 
 class MNArray_mch(object):
-    def _add_per_map(self, X, percent, block_list):
-        assert X.ndim == 4
-        equal_size = self.orows * self.ocols * percent / float(len(block_list))
-        for blockr, blockc in block_list:
-            map_blocks = int(round(equal_size / (blockr * blockc)))
-            total_blocks = self.channels * map_blocks
-            arrayr = (self.orows - blockr) // 1 + 1
-            arrayc = (self.ocols - blockc) // 1 + 1
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            for b in xrange(self.batches):  # 不同样本不同噪声
-                ch_idx = assign_ch_idx_permap(self.channels, map_blocks)
-                idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
-                ch_idx = np.repeat(ch_idx, blockr * blockc)
-                map_idx = array_idx[idx_for_array_idx].ravel()
-                X[b][ch_idx, :, map_idx] = 0.
-        return X
-
-    def _add_cross_ch(self, X, percent, block_list):
-        assert X.ndim == 4
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
-        for blockr, blockc in block_list:
-            total_blocks = int(round(equal_size / (blockr * blockc)))
-            arrayr = (self.orows - blockr) // 1 + 1  # 不考虑边界
-            arrayc = (self.ocols - blockc) // 1 + 1
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            for b in xrange(self.batches):  # 不同样本不同噪声
-                ch_idx = assign_ch_idx_partial_uniform(self.channels, total_blocks, **self.add_args)
-                idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
-                ch_idx = np.repeat(ch_idx, blockr * blockc)
-                map_idx = array_idx[idx_for_array_idx].ravel()
-                X[b][ch_idx, :, map_idx] = 0.
-        return X
-
-    def _add_cross_batch(self, X, percent, block_list):
-        assert X.ndim == 4
-        X = X.reshape((-1, self.mch, self.orows * self.ocols))
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
-        for blockr, blockc in block_list:
-            total_blocks = int(round(equal_size / (blockr * blockc)))
-            arrayr = (self.orows - blockr) // 1 + 1  # 不考虑边界
-            arrayc = (self.ocols - blockc) // 1 + 1
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            channels = self.batches * self.channels
-            total_blocks *= self.batches
-            ch_idx = assign_ch_idx_partial_uniform(channels, total_blocks, **self.add_args)
-            idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
-            ch_idx = np.repeat(ch_idx, blockr * blockc)
-            map_idx = array_idx[idx_for_array_idx].ravel()
-            X[ch_idx, :, map_idx] = 0.
-        return X
-
-    def apply(self, X, percent, block_list, mode, p_add, map_mode, p_center_of_image, p_center_of_block):
-        assert X.ndim == 5
+    def __init__(self, mode, p_add, map_mode, p_center_of_image, p_center_of_block):
         # 添加方式
         add_fn = {'permap': self._add_per_map, 'channel': self._add_cross_ch,
                   'batch': self._add_cross_batch}
         if mode not in add_fn.keys(): raise NotImplementedError
+        self.add_mn = add_fn[mode]
         if mode == 'permap':
             self.add_args = {}
         elif mode in ('channel', 'batch'):
@@ -439,20 +427,99 @@ class MNArray_mch(object):
             self.map_args = {'p_center_of_image': p_center_of_image,}
         elif map_mode == 'alter':
             self.map_args = {'p_center_of_image': p_center_of_image, 'p_center_of_block': p_center_of_block}
+
+    def _add_per_map(self, X, percent, block_list):
+        assert X.ndim == 5
         Xshape = X.shape
-        self.batches, self.channels, self.mch, self.orows, self.ocols = Xshape
-        self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
-        X = X.reshape((self.batches, self.channels, self.mch, -1))
-        block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-        X = add_fn[mode](X, percent, block_list)
+        batches, channels, mch, rows, cols = Xshape
+        X = X.reshape((batches, channels, mch, -1))
+        equal_size = rows * cols * percent / float(len(block_list))
+        for blockr, blockc in block_list:
+            map_blocks = int(round(equal_size / (blockr * blockc)))
+            total_blocks = channels * map_blocks
+            arrayr = (rows - blockr) // 1 + 1
+            arrayc = (cols - blockc) // 1 + 1
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_permap(channels, map_blocks)
+                idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
+                ch_idx = np.repeat(ch_idx, blockr * blockc)
+                map_idx = array_idx[idx_for_array_idx].ravel()
+                X[b][ch_idx, :, map_idx] = 0.
+        X = X.reshape(Xshape)
+        return X
+
+    def _add_cross_ch(self, X, percent, block_list):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, channels, mch, rows, cols = Xshape
+        X = X.reshape((batches, channels, mch, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
+        for blockr, blockc in block_list:
+            total_blocks = int(round(equal_size / (blockr * blockc)))
+            arrayr = (rows - blockr) // 1 + 1  # 不考虑边界
+            arrayc = (cols - blockc) // 1 + 1
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_partial_uniform(channels, total_blocks, **self.add_args)
+                idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
+                ch_idx = np.repeat(ch_idx, blockr * blockc)
+                map_idx = array_idx[idx_for_array_idx].ravel()
+                X[b][ch_idx, :, map_idx] = 0.
+        X = X.reshape(Xshape)
+        return X
+
+    def _add_cross_batch(self, X, percent, block_list):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, channels, mch, rows, cols = Xshape
+        X = X.reshape((batches * channels, mch, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
+        for blockr, blockc in block_list:
+            total_blocks = int(round(equal_size / (blockr * blockc)))
+            arrayr = (rows - blockr) // 1 + 1  # 不考虑边界
+            arrayc = (cols - blockc) // 1 + 1
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            channels = batches * channels
+            total_blocks *= batches
+            ch_idx = assign_ch_idx_partial_uniform(channels, total_blocks, **self.add_args)
+            idx_for_array_idx = self.assign_onemap_idx(arrayr, arrayc, total_blocks, **self.map_args)
+            ch_idx = np.repeat(ch_idx, blockr * blockc)
+            map_idx = array_idx[idx_for_array_idx].ravel()
+            X[ch_idx, :, map_idx] = 0.
+        X = X.reshape(Xshape)
+        return X
+
+    def apply_for_omap(self, X, percent, block_list):
+        assert X.ndim == 6
+        Xshape = X.shape
+        batches, orows, ocols, mch, frows, fcols = Xshape
+        self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
+        X = X.reshape((batches, orows, ocols, mch, -1)).transpose((0, 4, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
+        X = self.add_mn(X, percent, block_list)
+        X = X.transpose((0, 3, 4, 2, 1)).reshape(Xshape)
+        return X
+
+    def apply_for_patch(self, X, percent, block_list):
+        assert X.ndim == 6
+        Xshape = X.shape
+        batches, orows, ocols, mch, frows, fcols = Xshape
+        self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
+        X = X.reshape((batches, -1, mch, frows, fcols))
+        block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
+        X = self.add_mn(X, percent, block_list)
         X = X.reshape(Xshape)
         return X
 
 
+# p_add是保持加噪的比例,即1-p_add的比例不加噪,p_center是中心区域面积的比例
 def add_mn_array_mch(X, percent=0.5, block_list=((1, 1),), mode='channel', p_add=0.5,
-                     map_mode='uniform', p_center_of_image=0.5, p_center_of_block=0.5):
-    assert X.ndim == 5
-    X = MNArray_mch().apply(X, percent, block_list, mode, p_add, map_mode, p_center_of_image, p_center_of_block)
+                     map_mode='uniform', p_center_of_image=0.5, p_center_of_block=0.5, apply_mode='omap'):
+    mna = MNArray_mch(mode, p_add, map_mode, p_center_of_image, p_center_of_block)
+    apply_fn = {'omap': mna.apply_for_omap, 'patch': mna.apply_for_patch}
+    if apply_mode not in apply_fn.keys(): raise NotImplementedError
+    X = apply_fn[apply_mode](X, percent, block_list)
     return X
 
 
@@ -460,9 +527,10 @@ def add_mn_array_mch(X, percent=0.5, block_list=((1, 1),), mode='channel', p_add
 
 
 # 只分配包含目标的通道索引,origin_patches中每个patch都标注了目标
-def assign_ch_idx_partial_object(origin_patches, n_blocks, p_add):
-    channels = origin_patches.shape[0]
-    patchsum = origin_patches.sum(axis=(1, 2))
+def assign_ch_idx_partial_justfor_object(origin_maps, n_blocks, p_add):
+    assert origin_maps.ndim == 3
+    channels = origin_maps.shape[0]
+    patchsum = origin_maps.sum(axis=(1, 2))
     object_idx = np.where(patchsum > 0)[0]
     if len(object_idx) == 0:  # 如果没有目标,则通道可以完全随机分配
         object_idx = np.arange(channels)
@@ -474,16 +542,32 @@ def assign_ch_idx_partial_object(origin_patches, n_blocks, p_add):
     return ch_idx
 
 
-def get_orient_idx_all(blockr, blockc, channels, origin_patches):
+def get_origin_patches(orows, ocols, frows, fcols, pad, stride, p_center_of_image):
+    # stride和pad与获取patch一致,恢复出原始图像大小
+    originr = (orows - 1) * stride - pad * 2 + frows
+    originc = (ocols - 1) * stride - pad * 2 + fcols
+    # 默认目标处于中心区域
+    center_idx = get_center_idx(originr, originc, p_center_of_image)
+    origin_map = np.zeros(originr * originc, dtype=int)
+    origin_map[center_idx] = 1
+    origin_map = origin_map.reshape((1, 1, originr, originc))
+    # 目标区域用同样的方式获取patches,shape=(orows*ocols, frows*fcols)
+    origin_patches = im2col(origin_map, (frows, fcols), stride, pad, ignore_border=False)
+    return origin_patches
+
+
+# 获取每个通道patch的所有的block中包含目标的索引列表
+def get_orient_idx_all(blockr, blockc, origin_patches):
     im2colfn = im2col_compfn(origin_patches.shape[-2:], (blockr, blockc), 1, 0, ignore_border=True)
     patchsize = float(np.prod(origin_patches.shape[-2:]))
+    channels = origin_patches.shape[0]
     orient_idx_all = []
     for ch in xrange(channels):
         patch = origin_patches[ch][None, None, :, :]
         p_object = patch.sum() / patchsize  # 目标图像占总图像的比例,每个block中也应该有此比例的目标图像
         blocks = im2colfn(patch)
         blocksum = blocks.sum(axis=1)
-        orient_idx = np.where(blocksum >= blocks.shape[1] * p_object)[0]
+        orient_idx = np.where(blocksum > blocks.shape[1] * p_object)[0]
         if len(orient_idx) == 0:  # 如果全部是背景,则全部随机选取
             orient_idx = np.arange(len(blocks))
         orient_idx_all.append(copy(orient_idx))
@@ -499,103 +583,185 @@ def assign_onemap_idx_orient(ch_idx, orient_idx_all):
     return idx_for_array_idx
 
 
+def get_origin_blocks_cccp(rows, cols, blockr, blockc, p_center_of_image):
+    center_idx = get_center_idx(rows, cols, p_center_of_image)
+    origin_map = np.zeros(rows * cols, dtype=int)
+    origin_map[center_idx] = 1
+    origin_map = origin_map.reshape((1, 1, rows, cols))
+    origin_blocks = im2col(origin_map, (blockr, blockc), 1, 0, ignore_border=True)
+    return origin_blocks
+
+
+# 获取原始图像的所有blocks中包含目标的索引列表
+def get_orient_idx_all_cccp(rows, cols, blockr, blockc, p_center_of_image):
+    origin_blocks = get_origin_blocks_cccp(rows, cols, blockr, blockc, p_center_of_image)
+    blocksum = origin_blocks.sum(axis=1)
+    orient_idx_all = np.where(blocksum > 0)[0]
+    if len(orient_idx_all) == 0:  # 如果全部是背景,则全部随机选取
+        orient_idx_all = np.arange(len(origin_blocks))
+    return orient_idx_all
+
+
+# 对于每个通道,可选择的包含目标的索引列表都是一样的
+def assign_onemap_idx_orient_cccp(n_blocks, orient_idx_all):
+    idx_for_array_idx = np.random.permutation(len(orient_idx_all))[:n_blocks]
+    if len(idx_for_array_idx) < n_blocks:
+        times = int(np.ceil(float(n_blocks) / len(idx_for_array_idx)))
+        idx_for_array_idx = np.tile(idx_for_array_idx, times)[:n_blocks]
+    return idx_for_array_idx
+
+
 # 默认目标在原图的中心的一个矩形内,对每张orows*ocols的图包含目标的区域加噪blockr*blockc
 # 由于目标并不总是在中心,大小不固定且不一定是矩形
 class MNArrayOrient(object):
-    def _add_cross_ch(self, X, percent, block_list):
-        assert X.ndim == 3
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
+    def _add_cross_ch_ae(self, X, percent, block_list):
+        assert X.ndim == 4
+        Xshape = X.shape
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches, channels, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             total_blocks = int(round(equal_size / (blockr * blockc)))
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            orient_idx_all = get_orient_idx_all(blockr, blockc, self.channels, self.origin_patches)
-            for b in xrange(self.batches):  # 不同样本不同噪声
-                ch_idx = assign_ch_idx_partial_object(self.origin_patches, total_blocks, self.p_add)
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            orient_idx_all = get_orient_idx_all(blockr, blockc, self.origin_patches)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_partial_justfor_object(self.origin_patches, total_blocks, self.p_add)
                 idx_for_array_idx = assign_onemap_idx_orient(ch_idx, orient_idx_all)
                 ch_idx = np.repeat(ch_idx, blockr * blockc)
                 map_idx = array_idx[idx_for_array_idx].ravel()
                 X[b][ch_idx, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
-    def apply(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
+    def _add_cross_ch_cccp(self, X, percent, block_list):
         assert X.ndim == 4
         Xshape = X.shape
-        self.batches, self.channels, self.orows, self.ocols = Xshape
-        filter_size = int(np.sqrt(self.channels))
-        self.p_add = p_add
-        # stride和pad与获取patch一致,恢复出原始图像大小
-        originr = (self.orows - 1) * stride - pad * 2 + filter_size
-        originc = (self.ocols - 1) * stride - pad * 2 + filter_size
-        # 默认目标处于中心区域
-        center_idx = get_center_idx(originr, originc, p_center_of_image)
-        origin_map = np.zeros(originr * originc, dtype=int)
-        origin_map[center_idx] = 1
-        origin_map = origin_map.reshape((1, 1, originr, originc))
-        # 目标区域用同样的方式获取patches,shape=(channels,orows,ocols)
-        origin_patches = im2col(origin_map, filter_size, stride, pad, ignore_border=False)
-        self.origin_patches = origin_patches.reshape((self.orows, self.ocols, -1)).transpose((2, 0, 1))
-        self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
-        X = X.reshape((self.batches, self.channels, -1))
-        block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-        X = self._add_cross_ch(X, percent, block_list)
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches, channels, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
+        for blockr, blockc in block_list:
+            total_blocks = int(round(equal_size / (blockr * blockc)))
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            orient_idx_all = get_orient_idx_all_cccp(rows, cols, blockr, blockc, self.p_center_of_image)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_partial_uniform(channels, total_blocks, self.p_add)  # 目标位置默认都为中心,随机分配
+                idx_for_array_idx = assign_onemap_idx_orient_cccp(total_blocks, orient_idx_all)
+                ch_idx = np.repeat(ch_idx, blockr * blockc)
+                map_idx = array_idx[idx_for_array_idx].ravel()
+                X[b][ch_idx, map_idx] = 0.
         X = X.reshape(Xshape)
+        return X
+
+    def apply_for_omap(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, orows, ocols, frows, fcols = Xshape
+        self.p_add = p_add
+        origin_patches = get_origin_patches(orows, ocols, frows, fcols, pad, stride, p_center_of_image)
+        self.origin_patches = origin_patches.reshape((orows, ocols, -1)).transpose((2, 0, 1))
+        self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
+        X = X.reshape((batches, orows, ocols, -1)).transpose((0, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
+        X = X.transpose((0, 2, 3, 1)).reshape(Xshape)
+        return X
+
+    def apply_for_patch(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, orows, ocols, frows, fcols = Xshape
+        self.p_add = p_add
+        origin_patches = get_origin_patches(orows, ocols, frows, fcols, pad, stride, p_center_of_image)
+        self.origin_patches = origin_patches.reshape((-1, frows, fcols))
+        self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
+        X = X.reshape((batches, -1, frows, fcols))
+        block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
+        X = X.reshape(Xshape)
+        return X
+
+    def apply_for_cccp(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
+        assert X.ndim == 4
+        assert pad is None and stride is None
+        Xshape = X.shape
+        batches, rows, cols, channels = Xshape
+        self.p_add = p_add
+        self.p_center_of_image = p_center_of_image
+        self.idx_map = np.arange(rows * cols).reshape((1, 1, rows, cols))
+        X = X.transpose((0, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= rows and x[1] <= cols, block_list)
+        X = self._add_cross_ch_cccp(X, percent, block_list)
+        X = X.transpose((0, 2, 3, 1))
         return X
 
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪,p_center是中心区域面积的比例
 def add_mn_array_orient(X, pad, stride, percent=0.5, block_list=((1, 1),),
-                        p_add=0.5, p_center_of_image=(0.5, 0.5)):
-    assert X.ndim == 4
-    X = MNArrayOrient().apply(X, pad, stride, percent, block_list, p_add, p_center_of_image)
+                        p_add=0.5, p_center_of_image=(0.5, 0.5), apply_mode='omap'):
+    mnao = MNArrayOrient()
+    apply_fn = {'omap': mnao.apply_for_omap, 'patch': mnao.apply_for_patch, 'cccp': mnao.apply_for_cccp}
+    if apply_mode not in apply_fn.keys(): raise NotImplementedError
+    if apply_mode == 'cccp': pad = stride = None
+    X = apply_fn[apply_mode](X, pad, stride, percent, block_list, p_add, p_center_of_image)
     return X
 
 
 class MNArrayOrient_mch(object):
-    def _add_cross_ch(self, X, percent, block_list):
-        assert X.ndim == 4
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
+    def _add_cross_ch_ae(self, X, percent, block_list):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, channels, mch, rows, cols = Xshape
+        X = X.reshape((batches, channels, mch, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             total_blocks = int(round(equal_size / (blockr * blockc)))
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            orient_idx_all = get_orient_idx_all(blockr, blockc, self.channels, self.origin_patches)
-            for b in xrange(self.batches):  # 不同样本不同噪声
-                ch_idx = assign_ch_idx_partial_object(self.origin_patches, total_blocks, self.p_add)
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            orient_idx_all = get_orient_idx_all(blockr, blockc, self.origin_patches)
+            for b in xrange(batches):  # 不同样本不同噪声
+                ch_idx = assign_ch_idx_partial_justfor_object(self.origin_patches, total_blocks, self.p_add)
                 idx_for_array_idx = assign_onemap_idx_orient(ch_idx, orient_idx_all)
                 ch_idx = np.repeat(ch_idx, blockr * blockc)
                 map_idx = array_idx[idx_for_array_idx].ravel()
                 X[b][ch_idx, :, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
-    def apply(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
-        assert X.ndim == 5
+    def apply_for_omap(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
+        assert X.ndim == 6
         Xshape = X.shape
-        self.batches, self.channels, self.mch, self.orows, self.ocols = Xshape
-        filter_size = int(np.sqrt(self.channels))
+        batches, orows, ocols, mch, frows, fcols = Xshape
         self.p_add = p_add
-        # stride和pad与获取patch一致,恢复出原始图像大小
-        originr = (self.orows - 1) * stride - pad * 2 + filter_size
-        originc = (self.ocols - 1) * stride - pad * 2 + filter_size
-        # 默认目标处于中心区域
-        center_idx = get_center_idx(originr, originc, p_center_of_image)
-        origin_map = np.zeros(originr * originc, dtype=int)
-        origin_map[center_idx] = 1
-        origin_map = origin_map.reshape((1, 1, originr, originc))
-        # 将目标区域用同样的方式获取patches
-        origin_patches = im2col(origin_map, filter_size, stride, pad, ignore_border=False)
-        self.origin_patches = origin_patches.reshape((self.orows, self.ocols, -1)).transpose((2, 0, 1))
-        self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
-        X = X.reshape((self.batches, self.channels, self.mch, -1))
-        block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-        X = self._add_cross_ch(X, percent, block_list)
+        origin_patches = get_origin_patches(orows, ocols, frows, fcols, pad, stride, p_center_of_image)
+        self.origin_patches = origin_patches.reshape((orows, ocols, -1)).transpose((2, 0, 1))
+        self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
+        X = X.reshape((batches, orows, ocols, mch, -1)).transpose((0, 4, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
+        X = X.transpose((0, 3, 4, 2, 1)).reshape(Xshape)
+        return X
+
+    def apply_for_patch(self, X, pad, stride, percent, block_list, p_add, p_center_of_image):
+        assert X.ndim == 6
+        Xshape = X.shape
+        batches, orows, ocols, mch, frows, fcols = Xshape
+        self.p_add = p_add
+        origin_patches = get_origin_patches(orows, ocols, frows, fcols, pad, stride, p_center_of_image)
+        self.origin_patches = origin_patches.reshape((-1, frows, fcols))
+        self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
+        X = X.reshape((batches, -1, mch, frows, fcols))
+        block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
         X = X.reshape(Xshape)
         return X
 
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪,p_center是中心区域面积的比例
 def add_mn_array_orient_mch(X, pad, stride, percent=0.5, block_list=((1, 1),),
-                            p_add=0.5, p_center_of_image=(0.5, 0.5)):
-    assert X.ndim == 5
-    X = MNArrayOrient_mch().apply(X, pad, stride, percent, block_list, p_add, p_center_of_image)
+                            p_add=0.5, p_center_of_image=(0.5, 0.5), apply_mode='omap'):
+    mnao = MNArrayOrient_mch()
+    apply_fn = {'omap': mnao.apply_for_omap, 'patch': mnao.apply_for_patch}
+    if apply_mode not in apply_fn.keys(): raise NotImplementedError
+    X = apply_fn[apply_mode](X, pad, stride, percent, block_list, p_add, p_center_of_image)
     return X
 
 
@@ -603,7 +769,7 @@ def add_mn_array_orient_mch(X, pad, stride, percent=0.5, block_list=((1, 1),),
 
 
 # 在cv2.Canny没有高斯模糊
-def canny_edge_opencv(X, p_border=0.05):
+def canny_edge_opencv(X, border=0.05, sigma=1., lth=0.5, hth=0.8):
     from scipy.ndimage.filters import gaussian_filter
     def smooth_with_function_and_mask(image, function, mask):
         bleed_over = function(mask.astype(float))
@@ -618,21 +784,22 @@ def canny_edge_opencv(X, p_border=0.05):
     X = X.astype(np.float)
     rows, cols = X.shape
     mask = np.zeros(X.shape, dtype=bool)
-    startr, endr = int(np.round(rows * p_border)), int(np.round(rows * (1 - p_border)))
-    startc, endc = int(np.round(cols * p_border)), int(np.round(cols * (1 - p_border)))
+    startr, endr = int(np.round(rows * border)), int(np.round(rows * (1 - border)))
+    startc, endc = int(np.round(cols * border)), int(np.round(cols * (1 - border)))
     mask[startr:endr, startc:endc] = True
-    fsmooth = lambda x: gaussian_filter(x, 0.8, mode='constant')
+    fsmooth = lambda x: gaussian_filter(x, sigma, mode='constant')
     X = smooth_with_function_and_mask(X, fsmooth, mask)
     X -= np.min(X)  # 最大化图像的动态范围到0~255
     X *= 255. / np.max(X)
     X = np.round(X).astype(np.uint8)
-    edge = cv2.Canny(X, 180, 230)
+    lth, hth = int(255 * lth), int(255 * hth)
+    edge = cv2.Canny(X, threshold1=lth, threshold2=hth)
     edge /= 255
     return edge
 
 
 # 先做高斯模糊,基于numpy的速度更快
-def canny_edge_skimage(X, p_border=0.05):
+def canny_edge_skimage(X, border=0.05, sigma=1., lth=0.5, hth=0.8):
     assert X.ndim == 3  # 对灰度图像和多通道图像都可以,后者需要先转化为2维灰度图像
     X = X[0, :, :] if X.shape[0] == 1 else np.max(X, axis=0)
     X = X.astype(np.float)
@@ -640,22 +807,25 @@ def canny_edge_skimage(X, p_border=0.05):
     X /= np.max(X)
     rows, cols = X.shape
     mask = np.zeros(X.shape, dtype=bool)
-    startr, endr = int(np.round(rows * p_border)), int(np.round(rows * (1 - p_border)))
-    startc, endc = int(np.round(cols * p_border)), int(np.round(cols * (1 - p_border)))
+    startr, endr = int(np.round(rows * border)), int(np.round(rows * (1 - border)))
+    startc, endc = int(np.round(cols * border)), int(np.round(cols * (1 - border)))
     mask[startr:endr, startc:endc] = True
-    edge = feature.canny(X, sigma=0.9, low_threshold=0.5, high_threshold=0.8, mask=mask)
+    edge = feature.canny(X, sigma=sigma, low_threshold=lth, high_threshold=hth, mask=mask)
     return edge
 
 
-def get_edge_patches(originX, orows, ocols, im2colfn):
+# originX是一个原始图像
+# im2colfn要将原始图像经过fsize的滤波器得到(orows*ocols,fsize*fsize)的patch(与对oneChannel取的patch相同)
+def get_edge_patches(originX, edge_args, im2colfn):
     assert originX.ndim == 3  # originX可以是单通道也可以是多通道
-    edge = canny_edge_skimage(originX)
+    edge = canny_edge_skimage(originX, **edge_args)
     edge = edge[None, None, :, :]  # 对于边缘图像
-    edge_patches = im2colfn(edge)  # 与原来取patch一样
-    edge_patches = edge_patches.reshape((orows, ocols, -1)).transpose((2, 0, 1))
+    edge_patches = im2colfn(edge)
     return edge_patches
 
 
+# 获取每个通道patch的所有的block中包含目标的索引列表
+# im2colfn要将patch经过(blockr,blockc)的block得到(arrayr*arrayc,blockr*blockc)的blocks
 def get_edge_idx_all(edge_patches, im2colfn):
     channels = edge_patches.shape[0]
     edge_idx_all = []
@@ -665,7 +835,7 @@ def get_edge_idx_all(edge_patches, im2colfn):
         p_edge = patch.sum() / patchsize  # 边缘图像占总图像的比例,每个block中也应该有此比例的边缘图像
         blocks = im2colfn(patch)
         blocksum = blocks.sum(axis=1)
-        edge_idx = np.where(blocksum >= blocks.shape[1] * p_edge)[0]  # 含有边缘的备选索引
+        edge_idx = np.where(blocksum > blocks.shape[1] * p_edge)[0]  # 含有边缘的备选索引
         if len(edge_idx) == 0:  # 如果全部是背景,则全部随机选取
             edge_idx = np.arange(len(blocks))
         edge_idx_all.append(copy(edge_idx))
@@ -681,84 +851,184 @@ def assign_onemap_idx_edge(ch_idx, edge_idx_all):
     return idx_for_array_idx
 
 
+# 获取每个通道的边缘图像
+def get_edges_allchannels_cccp(originX, edge_args):
+    assert originX.ndim == 3
+    channels = originX.shape[0]
+    edges = []
+    for ch in xrange(channels):  # 每个通道寻找边缘图像
+        edge = canny_edge_skimage(originX[[ch]], **edge_args)
+        edges.append(copy(edge))
+    return np.array(edges)
+
+
 # 先将原图中目标的边缘找到,对每张orows*ocols的图包含目标边缘的区域加噪blockr*blockc
 class MNArrayEdge(object):
-    def _add_cross_ch(self, X, percent, block_list):
-        assert X.ndim == 3
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
+    def _add_cross_ch_ae(self, X, percent, block_list):
+        assert X.ndim == 4
+        Xshape = X.shape
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches, channels, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             total_blocks = int(round(equal_size / (blockr * blockc)))
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            im2colfn = im2col_compfn((self.orows, self.ocols), (blockr, blockc), 1, 0, ignore_border=True)
-            for b in xrange(self.batches):  # 对每个样本的原始图像计算canny边缘
-                edge_patches = get_edge_patches(self.originX[b], self.orows, self.ocols, self.im2colfn)
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            im2colfn = im2col_compfn((rows, cols), (blockr, blockc), 1, 0, ignore_border=True)
+            for b in xrange(batches):  # 对每个样本的原始图像计算canny边缘
+                edge_patches = get_edge_patches(self.originX[b], self.edge_args, self.im2colfn)
+                edge_patches = edge_patches.reshape((rows, cols, -1)).transpose((2, 0, 1)) \
+                    if self.mode == 'omap' else edge_patches.reshape((-1, rows, cols))
                 edge_idx_all = get_edge_idx_all(edge_patches, im2colfn)
-                ch_idx = assign_ch_idx_partial_object(edge_patches, total_blocks, self.p_add)
+                ch_idx = assign_ch_idx_partial_justfor_object(edge_patches, total_blocks, self.p_add)
                 idx_for_array_idx = assign_onemap_idx_edge(ch_idx, edge_idx_all)
                 ch_idx = np.repeat(ch_idx, blockr * blockc)
                 map_idx = array_idx[idx_for_array_idx].ravel()
                 X[b][ch_idx, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
-    def apply(self, X, originX, pad, stride, percent, block_list, p_add):
-        assert X.ndim == 4 and originX.ndim == 4
+    def _add_cross_ch_cccp(self, X, percent, block_list):
+        assert X.ndim == 4
         Xshape = X.shape
-        self.batches, self.channels, self.orows, self.ocols = Xshape
-        self.originX = originX
-        filter_size = int(np.sqrt(self.channels))
-        self.p_add = p_add
-        self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
-        self.im2colfn = im2col_compfn(originX.shape[-2:], filter_size, stride, pad, ignore_border=False)
-        X = X.reshape((self.batches, self.channels, -1))
-        block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-        X = self._add_cross_ch(X, percent, block_list)
+        batches, channels, rows, cols = Xshape
+        X = X.reshape((batches, channels, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
+        for blockr, blockc in block_list:
+            total_blocks = int(round(equal_size / (blockr * blockc)))
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            im2colfn = im2col_compfn((rows, cols), (blockr, blockc), 1, 0, ignore_border=True)
+            for b in xrange(batches):  # 不同样本不同噪声
+                edges = get_edges_allchannels_cccp(self.originX[b], self.edge_args)
+                edge_idx_all = get_edge_idx_all(edges, im2colfn)
+                ch_idx = assign_ch_idx_partial_justfor_object(edges, total_blocks, self.p_add)
+                idx_for_array_idx = assign_onemap_idx_edge(ch_idx, edge_idx_all)
+                ch_idx = np.repeat(ch_idx, blockr * blockc)
+                map_idx = array_idx[idx_for_array_idx].ravel()
+                X[b][ch_idx, map_idx] = 0.
         X = X.reshape(Xshape)
+        return X
+
+    def apply_for_omap(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+        assert X.ndim == 5 and originX.ndim == 4
+        Xshape = X.shape
+        batches, orows, ocols, frows, fcols = Xshape
+        self.originX = originX
+        self.p_add = p_add
+        self.edge_args = edge_args
+        self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
+        self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
+        self.mode = 'omap'
+        X = X.reshape((batches, orows, ocols, -1)).transpose((0, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
+        X = X.transpose((0, 2, 3, 1)).reshape(Xshape)
+        return X
+
+    def apply_for_patch(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+        assert X.ndim == 5 and originX.ndim == 4
+        Xshape = X.shape
+        batches, orows, ocols, frows, fcols = Xshape
+        self.originX = originX
+        self.p_add = p_add
+        self.edge_args = edge_args
+        self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
+        self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
+        self.mode = 'patch'
+        X = X.reshape((batches, -1, frows, fcols))
+        block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
+        X = X.reshape(Xshape)
+        return X
+
+    def apply_for_cccp(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+        assert X.ndim == 4 and originX.ndim == 4
+        assert pad is None and stride is None
+        Xshape = X.shape
+        batches, rows, cols, channels = Xshape
+        self.originX = originX
+        self.p_add = p_add
+        self.edge_args = edge_args
+        self.idx_map = np.arange(rows * cols).reshape((1, 1, rows, cols))
+        X = X.transpose((0, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= rows and x[1] <= cols, block_list)
+        X = self._add_cross_ch_cccp(X, percent, block_list)
+        X = X.transpose((0, 2, 3, 1))
         return X
 
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪
-def add_mn_array_edge(X, originX, pad, stride, percent=0.5, block_list=((1, 1),), p_add=0.5):
-    assert X.ndim == 4
-    X = MNArrayEdge().apply(X, originX, pad, stride, percent, block_list, p_add)
+def add_mn_array_edge(X, originX, pad, stride, percent=0.5, block_list=((1, 1),),
+                      p_add=0.5, edge_args=None, apply_mode='omap'):
+    mnae = MNArrayEdge()
+    apply_fn = {'omap': mnae.apply_for_omap, 'patch': mnae.apply_for_patch, 'cccp': mnae.apply_for_cccp}
+    if apply_mode not in apply_fn.keys(): raise NotImplementedError
+    if apply_mode == 'cccp': pad = stride = None
+    X = apply_fn[apply_mode](X, originX, pad, stride, percent, block_list, p_add, edge_args)
     return X
 
 
 class MNArrayEdge_mch(object):
-    def _add_cross_ch(self, X, percent, block_list):
-        assert X.ndim == 4
-        equal_size = self.channels * self.orows * self.ocols * percent / float(len(block_list))
+    def _add_cross_ch_ae(self, X, percent, block_list):
+        assert X.ndim == 5
+        Xshape = X.shape
+        batches, channels, mch, rows, cols = Xshape
+        X = X.reshape((batches, channels, mch, -1))
+        equal_size = channels * rows * cols * percent / float(len(block_list))
         for blockr, blockc in block_list:
             total_blocks = int(round(equal_size / (blockr * blockc)))
-            array_idx = im2col(self.oidx, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
-            im2colfn = im2col_compfn((self.orows, self.ocols), (blockr, blockc), 1, 0, ignore_border=True)
-            for b in xrange(self.batches):  # 对每个样本的原始图像计算canny边缘
-                edge_patches = get_edge_patches(self.originX[b], self.orows, self.ocols, self.im2colfn)
+            array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
+            im2colfn = im2col_compfn((rows, cols), (blockr, blockc), 1, 0, ignore_border=True)
+            for b in xrange(batches):  # 对每个样本的原始图像计算canny边缘
+                edge_patches = get_edge_patches(self.originX[b], self.edge_args, self.im2colfn)
+                edge_patches = edge_patches.reshape((rows, cols, -1)).transpose((2, 0, 1)) \
+                    if self.mode == 'omap' else edge_patches.reshape((-1, rows, cols))
                 edge_idx_all = get_edge_idx_all(edge_patches, im2colfn)
-                ch_idx = assign_ch_idx_partial_object(edge_patches, total_blocks, self.p_add)
+                ch_idx = assign_ch_idx_partial_justfor_object(edge_patches, total_blocks, self.p_add)
                 idx_for_array_idx = assign_onemap_idx_edge(ch_idx, edge_idx_all)
                 ch_idx = np.repeat(ch_idx, blockr * blockc)
                 map_idx = array_idx[idx_for_array_idx].ravel()
                 X[b][ch_idx, :, map_idx] = 0.
+        X = X.reshape(Xshape)
         return X
 
-    def apply(self, X, originX, pad, stride, percent, block_list, p_add):
-        assert X.ndim == 5 and originX.ndim == 4
+    def apply_for_omap(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+        assert X.ndim == 6 and originX.ndim == 4
         Xshape = X.shape
-        self.batches, self.channels, self.mch, self.orows, self.ocols = Xshape
+        batches, orows, ocols, mch, frows, fcols = Xshape
         self.originX = originX
-        filter_size = int(np.sqrt(self.channels))
         self.p_add = p_add
-        self.oidx = np.arange(self.orows * self.ocols).reshape((1, 1, self.orows, self.ocols))
-        self.im2colfn = im2col_compfn(originX.shape[-2:], filter_size, stride, pad, ignore_border=False)
-        X = X.reshape((self.batches, self.channels, self.mch, -1))
-        block_list = filter(lambda x: x[0] <= self.orows and x[1] <= self.ocols, block_list)
-        X = self._add_cross_ch(X, percent, block_list)
+        self.edge_args = edge_args
+        self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
+        self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
+        self.mode = 'omap'
+        X = X.reshape((batches, orows, ocols, mch, -1)).transpose((0, 4, 3, 1, 2))
+        block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
+        X = X.transpose((0, 3, 4, 2, 1)).reshape(Xshape)
+        return X
+
+    def apply_for_patch(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+        assert X.ndim == 6 and originX.ndim == 4
+        Xshape = X.shape
+        batches, orows, ocols, mch, frows, fcols = Xshape
+        self.originX = originX
+        self.p_add = p_add
+        self.edge_args = edge_args
+        self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
+        self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
+        self.mode = 'patch'
+        X = X.reshape((batches, -1, mch, frows, fcols))
+        block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
+        X = self._add_cross_ch_ae(X, percent, block_list)
         X = X.reshape(Xshape)
         return X
 
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪
-def add_mn_array_edge_mch(X, originX, pad, stride, percent=0.5, block_list=((1, 1),), p_add=0.5):
-    assert X.ndim == 5
-    X = MNArrayEdge_mch().apply(X, originX, pad, stride, percent, block_list, p_add)
+def add_mn_array_edge_mch(X, originX, pad, stride, percent=0.5, block_list=((1, 1),),
+                          p_add=0.5, edge_args=None, apply_mode='omap'):
+    mnae = MNArrayEdge_mch()
+    apply_fn = {'omap': mnae.apply_for_omap, 'patch': mnae.apply_for_patch}
+    if apply_mode not in apply_fn.keys(): raise NotImplementedError
+    X = apply_fn[apply_mode](X, originX, pad, stride, percent, block_list, p_add, edge_args)
     return X

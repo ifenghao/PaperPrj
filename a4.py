@@ -50,7 +50,7 @@ class LRFELMAE(object):
         #                            cccp_noise_args={'pad': 0, 'stride': 1, 'percent': 0.3,
         #                                             'block_list': ((15, 15),), 'p_add': 0.8,
         #                                             'p_center_of_image': (0.8, 0.5), 'p_center_of_block': 0.5})
-        net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, filter_size=6, act_mode='relu',
+        net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
                                    pad=0, stride=1, pad_=0, stride_=1, noise_type='mn_array_edge',
                                    noise_args={'pad': 0, 'stride': 1, 'percent': 0.3,
                                                'block_list': ((10, 10),), 'p_add': 0.8},
@@ -86,7 +86,7 @@ class LRFELMAE(object):
         #                            cccp_noise_args={'pad': 0, 'stride': 1, 'percent': 0.3,
         #                                             'block_list': ((4, 4),), 'p_add': 0.8,
         #                                             'p_center_of_image': (0.8, 0.5), 'p_center_of_block': 0.5})
-        net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, filter_size=6, act_mode='relu',
+        net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
                                    pad=0, stride=1, pad_=0, stride_=1, noise_type='mn_array_edge',
                                    noise_args={'pad': 0, 'stride': 1, 'percent': 0.3,
                                                'block_list': ((7, 7),), 'p_add': 0.8},
