@@ -1108,9 +1108,9 @@ import utils
 #         #     print x[b][ch].reshape((23,23)).astype(int)
 
 
-x = 23
+x = 20
 for i in range(5):
-    x = int(float(x) / 1.5)
+    x = int(float(x) / 5.5)
     print x
 
 
@@ -1513,3 +1513,10 @@ for i in range(5):
 # print x
 # x=x.reshape((1,9,49)).transpose((0,2,1))
 # print x.reshape((1,49,3,3))
+
+# from ultimate.noise import add_mn_array_orient
+# x=np.ones((1,23,23,6,6), dtype=int)
+# x=add_mn_array_orient(x, 0, 1, 0.3, ((5,5),), 0.8, 0.5, 'patch')
+# pass
+
+print np.arange(4,6.5,1)

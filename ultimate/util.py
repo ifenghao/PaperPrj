@@ -14,6 +14,8 @@ __all__ = ['compute_beta_direct', 'compute_beta_rand',
            'norm2d', 'norm4d', 'norm2dglobal', 'norm4dglobal',
            'whiten2d', 'whiten2d']
 
+splits = 2
+
 
 ########################################################################################################################
 
@@ -123,7 +125,7 @@ def im2col_compfn(shape, fsize, stride, pad, ignore_border=False):
 # 对每一个patch里的元素去均值归一化
 def norm2d(X, reg=0.1):
     size = X.shape[0]
-    batchSize = size // 10
+    batchSize = size // splits
     startRange = range(0, size - batchSize + 1, batchSize)
     endRange = range(batchSize, size + 1, batchSize)
     if size % batchSize != 0:
@@ -153,7 +155,7 @@ def norm2dglobal(X, mean=None, normalizer=None, reg=0.1):
         mean = X.mean(axis=0)
         normalizer = 0.  # 分解求方差
         size = X.shape[0]
-        batchSize = size // 10
+        batchSize = size // splits
         startRange = range(0, size - batchSize + 1, batchSize)
         endRange = range(batchSize, size + 1, batchSize)
         if size % batchSize != 0:
@@ -176,7 +178,7 @@ def norm4dglobal(X, mean=None, normalizer=None, reg=0.1):
         mean = X.mean(axis=(0, 2, 3))
         normalizer = 0.  # 分解求方差
         size = X.shape[0]
-        batchSize = size // 10
+        batchSize = size // splits
         startRange = range(0, size - batchSize + 1, batchSize)
         endRange = range(batchSize, size + 1, batchSize)
         if size % batchSize != 0:

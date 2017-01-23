@@ -29,89 +29,117 @@ class LRFELMAE(object):
         net = OrderedDict()
         # net['gcn0'] = GCNLayer()
         # layer1
-        # array_args1 = {'percent': 0.3, 'block_list': ((15, 15),),
-        #                'mode': 'channel', 'p_add': 0.8,
-        #                'map_mode': 'alter', 'p_center_of_image': 0.5, 'p_center_of_block': 0.75}
-        # ae_args1 = copy(array_args1)
-        # ae_args1['apply_mode'] = 'omap'
-        # cccp_args1 = copy(array_args1)
-        # cccp_args1['apply_mode'] = 'cccp'
-        # net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
-        #                            pad=0, stride=1, pad_=0, stride_=1,
-        #                            noise_type='mn_array', noise_args=ae_args1,
-        #                            add_pool=True, pool_type='fp', pool_size=1.5, mode='max',
-        #                            pool_args={'overlap': True,},
-        #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array',
-        #                            cccp_noise_args=cccp_args1)
-        # orient_args1 = {'pad': 0, 'stride': 1, 'percent': 0.3, 'block_list': ((15, 15),),
-        #                 'p_add': 0.8, 'p_center_of_image': (0.8, 0.5)}
-        # ae_args1 = copy(orient_args1)
-        # ae_args1['apply_mode'] = 'omap'
-        # cccp_args1 = copy(orient_args1)
-        # cccp_args1['apply_mode'] = 'cccp'
-        # net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
-        #                            pad=0, stride=1, pad_=0, stride_=1,
-        #                            noise_type='mn_array_orient', noise_args=ae_args1,
-        #                            add_pool=True, pool_type='fp', pool_size=1.5, mode='max',
-        #                            pool_args={'overlap': True,},
-        #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_orient',
-        #                            cccp_noise_args=cccp_args1)
-        edge_args1 = {'pad': 0, 'stride': 1, 'percent': 0.3, 'block_list': ((10, 10),),
-                      'p_add': 0.8, 'edge_args': {'border': 0.05, 'sigma': 0.9, 'lth': 0.5, 'hth': 0.8}}
+        array_args1 = {'percent': 0.25, 'block_list': None, 'mode': 'channel', 'p_add': 0.9,
+                       'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None,
+                       'apply_mode': None}
+        ae_args1 = copy(array_args1)
+        ae_args1['apply_mode'] = 'omap'
+        ae_args1['block_list'] = ((13, 13),)
+        cccp_args1 = copy(array_args1)
+        cccp_args1['apply_mode'] = 'cccp'
+        cccp_args1['block_list'] = ((13, 13),)
+        net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+                                   pad=0, stride=1, pad_=0, stride_=1,
+                                   noise_type='mn_array', noise_args=ae_args1,
+                                   add_pool=False, pool_type='fp', pool_size=1.5, mode='max',
+                                   pool_args={'overlap': True,},
+                                   add_cccp=False, cccp_out=32, cccp_noise_type='mn_array',
+                                   cccp_noise_args=cccp_args1)
+        orient_args1 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': None,
+                        'p_add': 0.9, 'p_center_of_image': (0.8, 0.6),
+                        'apply_mode': None}
+        ae_args1 = copy(orient_args1)
+        ae_args1['apply_mode'] = 'omap'
+        ae_args1['block_list'] = ((13, 13),)
+        cccp_args1 = copy(orient_args1)
+        cccp_args1['apply_mode'] = 'cccp'
+        cccp_args1['block_list'] = ((13, 13),)
+        net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+                                   pad=0, stride=1, pad_=0, stride_=1,
+                                   noise_type='mn_array_orient', noise_args=ae_args1,
+                                   add_pool=False, pool_type='fp', pool_size=1.5, mode='max',
+                                   pool_args={'overlap': True,},
+                                   add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_orient',
+                                   cccp_noise_args=cccp_args1)
+        edge_args1 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': None, 'edge_or_binary': None,
+                      'p_add': 0.9, 'edge_args': {'border': 0.05, 'sigma': 0.9, 'lth': 0.5, 'hth': 0.8},
+                      'apply_mode': None}
         ae_args1 = copy(edge_args1)
         ae_args1['apply_mode'] = 'omap'
+        ae_args1['block_list'] = ((13, 13),)
+        ae_args1['edge_or_binary'] = True
         cccp_args1 = copy(edge_args1)
         cccp_args1['apply_mode'] = 'cccp'
-        net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
+        cccp_args1['block_list'] = ((13, 13),)
+        cccp_args1['edge_or_binary'] = True
+        net['layer1'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
                                    pad=0, stride=1, pad_=0, stride_=1,
                                    noise_type='mn_array_edge', noise_args=ae_args1,
-                                   add_pool=True, pool_type='fp', pool_size=1.5, mode='max',
+                                   add_pool=False, pool_type='fp', pool_size=1.5, mode='max',
                                    pool_args={'overlap': True,},
                                    add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_edge',
                                    cccp_noise_args=cccp_args1)
         # net['gcn11'] = GCNLayer()
-        # net['cccp1'] = CCCPLayer(C=self.C, n_out=32, noise_type='mn_array',
-        #                          noise_args={'percent': 0.5, 'block_list': ((6, 6),),
-        #                                      'mode': 'channel', 'p_add': 0.8})
+        # cccp_array_args1 = {'percent': 0.25, 'block_list': ((13, 13),), 'mode': 'channel', 'p_add': 0.9,
+        #                     'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None,
+        #                     'apply_mode': 'cccp'}
+        # cccp_orient_args1 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': ((13, 13),),
+        #                      'p_add': 0.9, 'p_center_of_image': (0.8, 0.6),
+        #                      'apply_mode': 'cccp'}
+        # cccp_edge_args1 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': ((13, 13),),
+        #                    'p_add': 0.9, 'edge_args': {'border': 0., 'sigma': 0.9, 'lth': 0.5, 'hth': 0.8},
+        #                    'edge_or_binary': True, 'apply_mode': 'cccp'}
+        # net['cccp1'] = CCCPLayer(C=self.C, name=dir_name, n_out=32, act_mode='relu', noise_type='mn_array',
+        #                          noise_args=cccp_array_args1)
         # net['gcn12'] = GCNLayer()
         # layer2
-        # array_args2 = {'percent': 0.3, 'block_list': ((7, 7),),
-        #                'mode': 'channel', 'p_add': 0.8,
-        #                'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None}
-        # ae_args2 = copy(array_args2)
-        # ae_args2['apply_mode'] = 'omap'
-        # cccp_args2 = copy(array_args2)
-        # cccp_args2['apply_mode'] = 'cccp'
-        # net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
-        #                            pad=0, stride=1, pad_=0, stride_=1,
-        #                            noise_type='mn_array', noise_args=ae_args2,
-        #                            add_pool=True, pool_type='fp', pool_size=3.7, mode='max',
-        #                            pool_args={'overlap': True,},
-        #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array',
-        #                            cccp_noise_args=cccp_args2)
-        # orient_args2 = {'pad': 0, 'stride': 1, 'percent': 0.3, 'block_list': ((7, 7),),
-        #                 'p_add': 0.8, 'p_center_of_image': (0.8, 0.5)}
-        # ae_args2 = copy(orient_args2)
-        # ae_args2['apply_mode'] = 'omap'
-        # cccp_args2 = copy(orient_args2)
-        # cccp_args2['apply_mode'] = 'cccp'
-        # net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
-        #                            pad=0, stride=1, pad_=0, stride_=1,
-        #                            noise_type='mn_array_orient', noise_args=ae_args2,
-        #                            add_pool=True, pool_type='fp', pool_size=3.7, mode='max',
-        #                            pool_args={'overlap': True,},
-        #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_orient',
-        #                            cccp_noise_args=cccp_args2)
-        edge_args2 = {'pad': 0, 'stride': 1, 'percent': 0.3, 'block_list': ((7, 7),),
-                      'p_add': 0.8, 'edge_args': {'border': 0., 'sigma': 0.5, 'lth': 0.5, 'hth': 0.8}}
+        array_args2 = {'percent': 0.25, 'block_list': None, 'mode': 'channel', 'p_add': 0.9,
+                       'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None,
+                       'apply_mode': None}
+        ae_args2 = copy(array_args2)
+        ae_args2['apply_mode'] = 'omap'
+        ae_args2['block_list'] = ((11, 11),)
+        cccp_args2 = copy(array_args2)
+        cccp_args2['apply_mode'] = 'cccp'
+        cccp_args2['block_list'] = ((11, 11),)
+        net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+                                   pad=0, stride=1, pad_=0, stride_=1,
+                                   noise_type='mn_array', noise_args=ae_args2,
+                                   add_pool=True, pool_type='fp', pool_size=5.5, mode='avg',
+                                   pool_args={'overlap': True,},
+                                   add_cccp=False, cccp_out=32, cccp_noise_type='mn_array',
+                                   cccp_noise_args=cccp_args2)
+        orient_args2 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': None,
+                        'p_add': 0.9, 'p_center_of_image': (0.8, 0.6),
+                        'apply_mode': None}
+        ae_args2 = copy(orient_args2)
+        ae_args2['apply_mode'] = 'omap'
+        ae_args2['block_list'] = ((11, 11),)
+        cccp_args2 = copy(orient_args2)
+        cccp_args2['apply_mode'] = 'cccp'
+        cccp_args2['block_list'] = ((11, 11),)
+        net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+                                   pad=0, stride=1, pad_=0, stride_=1,
+                                   noise_type='mn_array_orient', noise_args=ae_args2,
+                                   add_pool=True, pool_type='fp', pool_size=5.5, mode='avg',
+                                   pool_args={'overlap': True,},
+                                   add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_orient',
+                                   cccp_noise_args=cccp_args2)
+        edge_args2 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': None, 'edge_or_binary': None,
+                      'p_add': 0.9, 'edge_args': {'border': 0., 'sigma': 0.5, 'lth': 0.5, 'hth': 0.8},
+                      'apply_mode': None}
         ae_args2 = copy(edge_args2)
         ae_args2['apply_mode'] = 'omap'
+        ae_args2['block_list'] = ((11, 11),)
+        ae_args2['edge_or_binary'] = True
         cccp_args2 = copy(edge_args2)
         cccp_args2['apply_mode'] = 'cccp'
-        net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=6, act_mode='relu',
+        cccp_args2['block_list'] = ((11, 11),)
+        cccp_args2['edge_or_binary'] = True
+        net['layer2'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
                                    pad=0, stride=1, pad_=0, stride_=1,
                                    noise_type='mn_array_edge', noise_args=ae_args2,
-                                   add_pool=True, pool_type='fp', pool_size=3.7, mode='max',
+                                   add_pool=True, pool_type='fp', pool_size=5.5, mode='avg',
                                    pool_args={'overlap': True,},
                                    add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_edge',
                                    cccp_noise_args=cccp_args2)
@@ -128,22 +156,70 @@ class LRFELMAE(object):
         #                                                      'map_mode': 'uniform', 'p_center_of_image': None,
         #                                                      'p_center_of_block': None})
         # net['gcn21'] = GCNLayer()
-        # net['cccp2'] = CCCPLayer(C=self.C, n_out=1024, noise_type='mn_array', act_mode='relu',
-        #                          noise_args={'percent': 0.3, 'block_list': ((2, 2),),
-        #                                      'mode': 'channel', 'p_add': 0.8,
-        #                                      'map_mode': 'uniform', 'p_center_of_image': None,
-        #                                      'p_center_of_block': None})
+        # cccp_array_args2 = {'percent': 0.25, 'block_list': ((11, 11),), 'mode': 'channel', 'p_add': 0.9,
+        #                     'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None,
+        #                     'apply_mode': 'cccp'}
+        # cccp_orient_args2 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': ((11, 11),),
+        #                      'p_add': 0.9, 'p_center_of_image': (0.8, 0.6),
+        #                      'apply_mode': 'cccp'}
+        # cccp_edge_args2 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': ((11, 11),),
+        #                    'p_add': 0.9, 'edge_args': {'border': 0., 'sigma': 0.9, 'lth': 0.5, 'hth': 0.8},
+        #                    'edge_or_binary': True, 'apply_mode': 'cccp'}
+        # net['cccp2'] = CCCPLayer(C=self.C, name=dir_name, n_out=1024, act_mode='relu', noise_type='mn_array',
+        #                          noise_args=cccp_array_args2)
         # net['gcn22'] = GCNLayer()
         # net['pool2']=PoolLayer(pool_type='fp', pool_size=1.5, mode='avg', pool_args={'overlap': True,})
         # layer3
-        # net['layer3'] = ELMAELayer(C=self.C, n_hidden=32, filter_size=4, pad=0, stride=1,
-        #                            pad_=0, stride_=1, noise_type='mn_array',
-        #                            noise_args={'percent': 0.3, 'block_list': ((5, 5),),
-        #                                        'mode': 'channel', 'p_add': 0.8},
-        #                            pool_type='fp', pool_size=2.4, mode='max', pool_args={'overlap': True,},
+        # array_args3 = {'percent': 0.25, 'block_list': None, 'mode': 'channel', 'p_add': 0.9,
+        #                'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None,
+        #                'apply_mode': None}
+        # ae_args3 = copy(array_args3)
+        # ae_args3['apply_mode'] = 'omap'
+        # ae_args3['block_list'] = ((9, 9),)
+        # cccp_args3 = copy(array_args3)
+        # cccp_args3['apply_mode'] = 'cccp'
+        # cccp_args3['block_list'] = ((9, 9),)
+        # net['layer3'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+        #                            pad=0, stride=1, pad_=0, stride_=1,
+        #                            noise_type='mn_array', noise_args=ae_args3,
+        #                            add_pool=True, pool_type='fp', pool_size=4.9, mode='avg',
+        #                            pool_args={'overlap': True,},
         #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array',
-        #                            cccp_noise_args={'percent': 0.3, 'block_list': ((5, 5),),
-        #                                             'mode': 'channel', 'p_add': 0.8})
+        #                            cccp_noise_args=cccp_args3)
+        # orient_args3 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': None,
+        #                 'p_add': 0.9, 'p_center_of_image': (0.8, 0.6),
+        #                 'apply_mode': None}
+        # ae_args3 = copy(orient_args3)
+        # ae_args3['apply_mode'] = 'omap'
+        # ae_args3['block_list'] = ((9, 9),)
+        # cccp_args3 = copy(orient_args3)
+        # cccp_args3['apply_mode'] = 'cccp'
+        # cccp_args3['block_list'] = ((9, 9),)
+        # net['layer3'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+        #                            pad=0, stride=1, pad_=0, stride_=1,
+        #                            noise_type='mn_array_orient', noise_args=ae_args3,
+        #                            add_pool=True, pool_type='fp', pool_size=4.9, mode='avg',
+        #                            pool_args={'overlap': True,},
+        #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_orient',
+        #                            cccp_noise_args=cccp_args3)
+        # edge_args3 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': None, 'edge_or_binary': None,
+        #               'p_add': 0.9, 'edge_args': {'border': 0., 'sigma': 0.5, 'lth': 0.5, 'hth': 0.8},
+        #               'apply_mode': None}
+        # ae_args3 = copy(edge_args3)
+        # ae_args3['apply_mode'] = 'omap'
+        # ae_args3['block_list'] = ((9, 9),)
+        # ae_args3['edge_or_binary'] = True
+        # cccp_args3 = copy(edge_args3)
+        # cccp_args3['apply_mode'] = 'cccp'
+        # cccp_args3['block_list'] = ((9, 9),)
+        # cccp_args3['edge_or_binary'] = True
+        # net['layer3'] = ELMAELayer(C=self.C, name=dir_name, n_hidden=32, fsize=5, act_mode='relu',
+        #                            pad=0, stride=1, pad_=0, stride_=1,
+        #                            noise_type='mn_array_edge', noise_args=ae_args3,
+        #                            add_pool=True, pool_type='fp', pool_size=4.9, mode='avg',
+        #                            pool_args={'overlap': True,},
+        #                            add_cccp=False, cccp_out=32, cccp_noise_type='mn_array_edge',
+        #                            cccp_noise_args=cccp_args3)
         # net['layer3'] = ELMAECrossPartLayer(C=self.C, n_hidden=32, filter_size=6, pad=0, stride=1,
         #                                     pad_=0, stride_=1, cross_size=4, noise_type='mn_array',
         #                                     noise_args={'percent': 0.3, 'block_list': ((5, 5),),
@@ -153,8 +229,19 @@ class LRFELMAE(object):
         #                                     cccp_noise_args={'percent': 0.3, 'block_list': ((5, 5),),
         #                                                      'mode': 'channel', 'p_add': 0.8})
         # net['gcn21'] = GCNLayer()
-        # net['cccp2'] = CCCPLayer(C=self.C, n_out=289, noise_level=0.2)
+        # cccp_array_args3 = {'percent': 0.25, 'block_list': ((9, 9),), 'mode': 'channel', 'p_add': 0.9,
+        #                     'map_mode': 'uniform', 'p_center_of_image': None, 'p_center_of_block': None,
+        #                     'apply_mode': 'cccp'}
+        # cccp_orient_args3 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': ((9, 9),),
+        #                      'p_add': 0.9, 'p_center_of_image': (0.8, 0.6),
+        #                      'apply_mode': 'cccp'}
+        # cccp_edge_args3 = {'pad': 0, 'stride': 1, 'percent': 0.25, 'block_list': ((9, 9),),
+        #                    'p_add': 0.9, 'edge_args': {'border': 0., 'sigma': 0.9, 'lth': 0.5, 'hth': 0.8},
+        #                    'edge_or_binary': True, 'apply_mode': 'cccp'}
+        # net['cccp3'] = CCCPLayer(C=self.C, name=dir_name, n_out=1024, act_mode='relu', noise_type='mn_array',
+        #                          noise_args=cccp_array_args3)
         # net['gcn22'] = GCNLayer()
+        net['pool3'] = PoolLayer(pool_type='fp', pool_size=5.5, mode='avg', pool_args={'overlap': True,})
         return net
 
     def _get_train_output(self, net, inputX):
@@ -178,7 +265,7 @@ class LRFELMAE(object):
         netout = netout.reshape((netout.shape[0], -1))
         # self.classifier = Classifier_ELMtimescv(n_rep=3, C_range=10 ** np.arange(-1., 3., 1.), times_range=[12, ])
         self.classifier = Classifier_KELMcv(C_range=10 ** np.arange(3.5, 7., 1.5), kernel_type='rbf',
-                                            kernel_args_list=10 ** np.arange(3., 7., 1.25))
+                                            kernel_args_list=10 ** np.arange(4., 6.5, 1.))
         return self.classifier.train_cv(netout, inputy)
 
     def test(self, inputX, inputy):
@@ -188,9 +275,10 @@ class LRFELMAE(object):
 
 
 def main():
-    tr_X, te_X, tr_y, te_y = utils.load.mnist(onehot=True)
+    tr_X, te_X, tr_y, te_y = utils.load.mnist_vary('basic', onehot=True)
     tr_X = utils.pre.norm4d_per_sample(tr_X)
     te_X = utils.pre.norm4d_per_sample(te_X)
+    # tr_X, tr_y = tr_X[:30000], tr_y[:30000]
     # tr_X, te_X, tr_y, te_y = utils.pre.cifarWhiten('cifar10')
     # tr_y = utils.load.one_hot(tr_y, 10)
     # te_y = utils.load.one_hot(te_y, 10)

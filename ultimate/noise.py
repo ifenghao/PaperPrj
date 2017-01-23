@@ -3,9 +3,12 @@ import numpy as np
 from copy import copy
 import cv2
 from skimage import feature
+from skimage.morphology import binary_closing
 from util import *
 
 __all__ = ['add_noise_decomp']
+
+splits = 2
 
 
 # 统一X的输入维度(batches,orows,ocols,filter_size,filter_size)
@@ -19,7 +22,7 @@ def add_noise_decomp(X, noise_type, args):
         raise NotImplementedError
     noise_fn = noise_dict[noise_type]
     size = X.shape[0]
-    batchSize = size / 10
+    batchSize = size / splits
     startRange = range(0, size - batchSize + 1, batchSize)
     endRange = range(batchSize, size + 1, batchSize)
     if size % batchSize != 0:
@@ -542,16 +545,16 @@ def assign_ch_idx_partial_justfor_object(origin_maps, n_blocks, p_add):
     return ch_idx
 
 
+# 默认目标处于中心区域,目标区域为1,背景区域为0
 def get_origin_patches(orows, ocols, frows, fcols, pad, stride, p_center_of_image):
     # stride和pad与获取patch一致,恢复出原始图像大小
     originr = (orows - 1) * stride - pad * 2 + frows
     originc = (ocols - 1) * stride - pad * 2 + fcols
-    # 默认目标处于中心区域
     center_idx = get_center_idx(originr, originc, p_center_of_image)
     origin_map = np.zeros(originr * originc, dtype=int)
     origin_map[center_idx] = 1
     origin_map = origin_map.reshape((1, 1, originr, originc))
-    # 目标区域用同样的方式获取patches,shape=(orows*ocols, frows*fcols)
+    # 目标区域用同样的方式获取(orows*ocols, frows*fcols)的patches
     origin_patches = im2col(origin_map, (frows, fcols), stride, pad, ignore_border=False)
     return origin_patches
 
@@ -567,7 +570,7 @@ def get_orient_idx_all(blockr, blockc, origin_patches):
         p_object = patch.sum() / patchsize  # 目标图像占总图像的比例,每个block中也应该有此比例的目标图像
         blocks = im2colfn(patch)
         blocksum = blocks.sum(axis=1)
-        orient_idx = np.where(blocksum > blocks.shape[1] * p_object)[0]
+        orient_idx = np.where(blocksum >= blocks.shape[1] * p_object)[0]
         if len(orient_idx) == 0:  # 如果全部是背景,则全部随机选取
             orient_idx = np.arange(len(blocks))
         orient_idx_all.append(copy(orient_idx))
@@ -583,6 +586,7 @@ def assign_onemap_idx_orient(ch_idx, orient_idx_all):
     return idx_for_array_idx
 
 
+# 默认目标处于中心区域,目标区域为1,背景区域为0
 def get_origin_blocks_cccp(rows, cols, blockr, blockc, p_center_of_image):
     center_idx = get_center_idx(rows, cols, p_center_of_image)
     origin_map = np.zeros(rows * cols, dtype=int)
@@ -795,6 +799,7 @@ def canny_edge_opencv(X, border=0.05, sigma=1., lth=0.5, hth=0.8):
     lth, hth = int(255 * lth), int(255 * hth)
     edge = cv2.Canny(X, threshold1=lth, threshold2=hth)
     edge /= 255
+    edge = binary_closing(edge)  # 填充空白空洞
     return edge
 
 
@@ -811,7 +816,20 @@ def canny_edge_skimage(X, border=0.05, sigma=1., lth=0.5, hth=0.8):
     startc, endc = int(np.round(cols * border)), int(np.round(cols * (1 - border)))
     mask[startr:endr, startc:endc] = True
     edge = feature.canny(X, sigma=sigma, low_threshold=lth, high_threshold=hth, mask=mask)
+    edge = binary_closing(edge)  # 填充空白空洞
     return edge
+
+
+# 直接对图像二值化提取目标位置,只对MNIST使用
+def binary_object(X):
+    assert X.ndim == 3  # 对灰度图像和多通道图像都可以,后者需要先转化为2维灰度图像
+    X = X[0, :, :] if X.shape[0] == 1 else np.max(X, axis=0)
+    X = X.astype(np.float)
+    X -= np.min(X)  # 最大化图像的动态范围到-1~1
+    X *= 255. / np.max(X)
+    X = X.astype(np.uint8)
+    X = X > 0
+    return X
 
 
 # originX是一个原始图像
@@ -822,6 +840,14 @@ def get_edge_patches(originX, edge_args, im2colfn):
     edge = edge[None, None, :, :]  # 对于边缘图像
     edge_patches = im2colfn(edge)
     return edge_patches
+
+
+def get_binary_patches(originX, im2colfn):
+    assert originX.ndim == 3
+    binary = binary_object(originX)
+    binary = binary[None, None, :, :]
+    binary_patches = im2colfn(binary)
+    return binary_patches
 
 
 # 获取每个通道patch的所有的block中包含目标的索引列表
@@ -835,7 +861,7 @@ def get_edge_idx_all(edge_patches, im2colfn):
         p_edge = patch.sum() / patchsize  # 边缘图像占总图像的比例,每个block中也应该有此比例的边缘图像
         blocks = im2colfn(patch)
         blocksum = blocks.sum(axis=1)
-        edge_idx = np.where(blocksum > blocks.shape[1] * p_edge)[0]  # 含有边缘的备选索引
+        edge_idx = np.where(blocksum >= blocks.shape[1] * p_edge)[0]  # 含有边缘的备选索引
         if len(edge_idx) == 0:  # 如果全部是背景,则全部随机选取
             edge_idx = np.arange(len(blocks))
         edge_idx_all.append(copy(edge_idx))
@@ -862,6 +888,16 @@ def get_edges_allchannels_cccp(originX, edge_args):
     return np.array(edges)
 
 
+def get_binary_allchannels_cccp(originX):
+    assert originX.ndim == 3
+    channels = originX.shape[0]
+    binaries = []
+    for ch in xrange(channels):
+        binary = binary_object(originX[[ch]])
+        binaries.append(copy(binary))
+    return np.array(binaries)
+
+
 # 先将原图中目标的边缘找到,对每张orows*ocols的图包含目标边缘的区域加噪blockr*blockc
 class MNArrayEdge(object):
     def _add_cross_ch_ae(self, X, percent, block_list):
@@ -875,9 +911,10 @@ class MNArrayEdge(object):
             array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
             im2colfn = im2col_compfn((rows, cols), (blockr, blockc), 1, 0, ignore_border=True)
             for b in xrange(batches):  # 对每个样本的原始图像计算canny边缘
-                edge_patches = get_edge_patches(self.originX[b], self.edge_args, self.im2colfn)
+                edge_patches = get_edge_patches(self.originX[b], self.edge_args, self.im2colfn) \
+                    if self.edge_or_binary else get_binary_patches(self.originX[b], self.im2colfn)
                 edge_patches = edge_patches.reshape((rows, cols, -1)).transpose((2, 0, 1)) \
-                    if self.mode == 'omap' else edge_patches.reshape((-1, rows, cols))
+                    if self.apply_mode == 'omap' else edge_patches.reshape((-1, rows, cols))
                 edge_idx_all = get_edge_idx_all(edge_patches, im2colfn)
                 ch_idx = assign_ch_idx_partial_justfor_object(edge_patches, total_blocks, self.p_add)
                 idx_for_array_idx = assign_onemap_idx_edge(ch_idx, edge_idx_all)
@@ -898,7 +935,8 @@ class MNArrayEdge(object):
             array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
             im2colfn = im2col_compfn((rows, cols), (blockr, blockc), 1, 0, ignore_border=True)
             for b in xrange(batches):  # 不同样本不同噪声
-                edges = get_edges_allchannels_cccp(self.originX[b], self.edge_args)
+                edges = get_edges_allchannels_cccp(self.originX[b], self.edge_args) \
+                    if self.edge_or_binary else get_binary_allchannels_cccp(self.originX[b])
                 edge_idx_all = get_edge_idx_all(edges, im2colfn)
                 ch_idx = assign_ch_idx_partial_justfor_object(edges, total_blocks, self.p_add)
                 idx_for_array_idx = assign_onemap_idx_edge(ch_idx, edge_idx_all)
@@ -908,39 +946,41 @@ class MNArrayEdge(object):
         X = X.reshape(Xshape)
         return X
 
-    def apply_for_omap(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+    def apply_for_omap(self, X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary):
         assert X.ndim == 5 and originX.ndim == 4
         Xshape = X.shape
         batches, orows, ocols, frows, fcols = Xshape
         self.originX = originX
         self.p_add = p_add
         self.edge_args = edge_args
+        self.edge_or_binary = edge_or_binary
         self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
         self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
-        self.mode = 'omap'
+        self.apply_mode = 'omap'
         X = X.reshape((batches, orows, ocols, -1)).transpose((0, 3, 1, 2))
         block_list = filter(lambda x: x[0] <= orows and x[1] <= ocols, block_list)
         X = self._add_cross_ch_ae(X, percent, block_list)
         X = X.transpose((0, 2, 3, 1)).reshape(Xshape)
         return X
 
-    def apply_for_patch(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+    def apply_for_patch(self, X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary):
         assert X.ndim == 5 and originX.ndim == 4
         Xshape = X.shape
         batches, orows, ocols, frows, fcols = Xshape
         self.originX = originX
         self.p_add = p_add
         self.edge_args = edge_args
+        self.edge_or_binary = edge_or_binary
         self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
         self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
-        self.mode = 'patch'
+        self.apply_mode = 'patch'
         X = X.reshape((batches, -1, frows, fcols))
         block_list = filter(lambda x: x[0] <= frows and x[1] <= fcols, block_list)
         X = self._add_cross_ch_ae(X, percent, block_list)
         X = X.reshape(Xshape)
         return X
 
-    def apply_for_cccp(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+    def apply_for_cccp(self, X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary):
         assert X.ndim == 4 and originX.ndim == 4
         assert pad is None and stride is None
         Xshape = X.shape
@@ -948,6 +988,7 @@ class MNArrayEdge(object):
         self.originX = originX
         self.p_add = p_add
         self.edge_args = edge_args
+        self.edge_or_binary = edge_or_binary
         self.idx_map = np.arange(rows * cols).reshape((1, 1, rows, cols))
         X = X.transpose((0, 3, 1, 2))
         block_list = filter(lambda x: x[0] <= rows and x[1] <= cols, block_list)
@@ -958,12 +999,12 @@ class MNArrayEdge(object):
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪
 def add_mn_array_edge(X, originX, pad, stride, percent=0.5, block_list=((1, 1),),
-                      p_add=0.5, edge_args=None, apply_mode='omap'):
+                      p_add=0.5, edge_args=None, apply_mode='omap', edge_or_binary=True):
     mnae = MNArrayEdge()
     apply_fn = {'omap': mnae.apply_for_omap, 'patch': mnae.apply_for_patch, 'cccp': mnae.apply_for_cccp}
     if apply_mode not in apply_fn.keys(): raise NotImplementedError
     if apply_mode == 'cccp': pad = stride = None
-    X = apply_fn[apply_mode](X, originX, pad, stride, percent, block_list, p_add, edge_args)
+    X = apply_fn[apply_mode](X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary)
     return X
 
 
@@ -979,7 +1020,8 @@ class MNArrayEdge_mch(object):
             array_idx = im2col(self.idx_map, (blockr, blockc), 1, 0, ignore_border=True).astype(int)
             im2colfn = im2col_compfn((rows, cols), (blockr, blockc), 1, 0, ignore_border=True)
             for b in xrange(batches):  # 对每个样本的原始图像计算canny边缘
-                edge_patches = get_edge_patches(self.originX[b], self.edge_args, self.im2colfn)
+                edge_patches = get_edge_patches(self.originX[b], self.edge_args, self.im2colfn) \
+                    if self.edge_or_binary else get_binary_patches(self.originX[b], self.im2colfn)
                 edge_patches = edge_patches.reshape((rows, cols, -1)).transpose((2, 0, 1)) \
                     if self.mode == 'omap' else edge_patches.reshape((-1, rows, cols))
                 edge_idx_all = get_edge_idx_all(edge_patches, im2colfn)
@@ -991,13 +1033,14 @@ class MNArrayEdge_mch(object):
         X = X.reshape(Xshape)
         return X
 
-    def apply_for_omap(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+    def apply_for_omap(self, X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary):
         assert X.ndim == 6 and originX.ndim == 4
         Xshape = X.shape
         batches, orows, ocols, mch, frows, fcols = Xshape
         self.originX = originX
         self.p_add = p_add
         self.edge_args = edge_args
+        self.edge_or_binary = edge_or_binary
         self.idx_map = np.arange(orows * ocols).reshape((1, 1, orows, ocols))
         self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
         self.mode = 'omap'
@@ -1007,13 +1050,14 @@ class MNArrayEdge_mch(object):
         X = X.transpose((0, 3, 4, 2, 1)).reshape(Xshape)
         return X
 
-    def apply_for_patch(self, X, originX, pad, stride, percent, block_list, p_add, edge_args):
+    def apply_for_patch(self, X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary):
         assert X.ndim == 6 and originX.ndim == 4
         Xshape = X.shape
         batches, orows, ocols, mch, frows, fcols = Xshape
         self.originX = originX
         self.p_add = p_add
         self.edge_args = edge_args
+        self.edge_or_binary = edge_or_binary
         self.idx_map = np.arange(frows * fcols).reshape((1, 1, frows, fcols))
         self.im2colfn = im2col_compfn(originX.shape[-2:], (frows, fcols), stride, pad, ignore_border=False)
         self.mode = 'patch'
@@ -1026,9 +1070,9 @@ class MNArrayEdge_mch(object):
 
 # p_add是保持加噪的比例,即1-p_add的比例不加噪
 def add_mn_array_edge_mch(X, originX, pad, stride, percent=0.5, block_list=((1, 1),),
-                          p_add=0.5, edge_args=None, apply_mode='omap'):
+                          p_add=0.5, edge_args=None, apply_mode='omap', edge_or_binary=True):
     mnae = MNArrayEdge_mch()
     apply_fn = {'omap': mnae.apply_for_omap, 'patch': mnae.apply_for_patch}
     if apply_mode not in apply_fn.keys(): raise NotImplementedError
-    X = apply_fn[apply_mode](X, originX, pad, stride, percent, block_list, p_add, edge_args)
+    X = apply_fn[apply_mode](X, originX, pad, stride, percent, block_list, p_add, edge_args, edge_or_binary)
     return X

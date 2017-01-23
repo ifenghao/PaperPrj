@@ -3,6 +3,8 @@ import numpy as np
 
 __all__ = ['activate']
 
+splits = 2
+
 
 def activate(X, mode):
     act_fn = {'relu': relu, 'lrelu': leaky_relu, 'elu': elu, 'tanh': np.tanh}
@@ -13,7 +15,7 @@ def activate(X, mode):
 
 def relu(X):
     size = X.shape[0]
-    batchSize = size / 10
+    batchSize = size / splits
     startRange = range(0, size - batchSize + 1, batchSize)
     endRange = range(batchSize, size + 1, batchSize)
     if size % batchSize != 0:
@@ -29,7 +31,7 @@ def leaky_relu(X, alpha=0.2):
     f1 = 0.5 * (1 + alpha)
     f2 = 0.5 * (1 - alpha)
     size = X.shape[0]
-    batchSize = size / 10
+    batchSize = size / splits
     startRange = range(0, size - batchSize + 1, batchSize)
     endRange = range(batchSize, size + 1, batchSize)
     if size % batchSize != 0:
@@ -43,7 +45,7 @@ def leaky_relu(X, alpha=0.2):
 
 def elu(X, alpha=1):
     size = X.shape[0]
-    batchSize = size / 10
+    batchSize = size / splits
     startRange = range(0, size - batchSize + 1, batchSize)
     endRange = range(batchSize, size + 1, batchSize)
     if size % batchSize != 0:
