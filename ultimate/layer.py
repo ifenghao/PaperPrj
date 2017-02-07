@@ -76,6 +76,9 @@ class ELMAELayer(Layer):
         noise_patches = add_noise_decomp(noise_patches, self.noise_type, self.noise_args)
         if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
             noise_patches = noise_patches.reshape((-1, patch_size))
+        if self.noise_type == 'mn_array_edge':  # 释放多余内存
+            self.noise_args['originX'] = None
+        del oneChannel
         hiddens = np.dot(noise_patches, W)
         del noise_patches
         hmax, hmin = np.max(hiddens, axis=0), np.min(hiddens, axis=0)
@@ -254,6 +257,9 @@ class ELMAECrossAllLayer(Layer):
             noise_patches = noise_patches.reshape((batches, channels, self.orows_, self.ocols_, self.fsize, self.fsize))
             noise_patches = noise_patches.transpose((0, 2, 3, 1, 4, 5))
             noise_patches = noise_patches.reshape((-1, channels * patch_size))
+        if self.noise_type in ('mn_array_edge', 'mn_array_edge_mch'):
+            self.noise_args['originX'] = None
+        del inputX
         hiddens = np.dot(noise_patches, W)
         del noise_patches
         hmax, hmin = np.max(hiddens, axis=0), np.min(hiddens, axis=0)
@@ -399,6 +405,9 @@ class ELMAECrossPartLayer(Layer):
             noise_patches = noise_patches.reshape((batches, channels, self.orows_, self.ocols_, self.fsize, self.fsize))
             noise_patches = noise_patches.transpose((0, 2, 3, 1, 4, 5))
             noise_patches = noise_patches.reshape((-1, channels * patch_size))
+        if self.noise_type in ('mn_array_edge', 'mn_array_edge_mch'):  # 需要原始图像
+            self.noise_args['originX'] = None
+        del partX
         hiddens = np.dot(noise_patches, W)
         del noise_patches
         hmax, hmin = np.max(hiddens, axis=0), np.min(hiddens, axis=0)
@@ -857,12 +866,16 @@ class CCCPLayer(Layer):
         W, b = normal_random(input_unit=n_in, hidden_unit=self.n_out)
         W = orthonormalize(W)
         # 在转化的矩阵上加噪
-        if self.noise_type == 'mn_array_edge':  # 需要原始图像
-            self.noise_args['originX'] = inputX.transpose((0, 3, 1, 2))
         noiseX = np.copy(inputX)
-        inputX = inputX.reshape((-1, n_in))
+        if self.noise_type == 'mn_array_edge':  # 需要原始图像
+            inputX = inputX.transpose((0, 3, 1, 2))
+            self.noise_args['originX'] = inputX  # 使用同样的inputX减少内存
         noiseX = add_noise_decomp(noiseX, self.noise_type, self.noise_args)
         noiseX = noiseX.reshape((-1, n_in))
+        if self.noise_type == 'mn_array_edge':  # 还原原始图像
+            inputX = inputX.transpose((0, 2, 3, 1))
+            self.noise_args['originX'] = None
+        inputX = inputX.reshape((-1, n_in))
         H = np.dot(noiseX, W)
         del noiseX
         hmax, hmin = np.max(H, axis=0), np.min(H, axis=0)

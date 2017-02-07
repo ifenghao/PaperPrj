@@ -82,17 +82,19 @@ def uniform_random(input_unit, hidden_unit):
 # 只使用一次计算出结果的时候可以使用,但是需要反复计算时速度很慢
 def im2col(inputX, fsize, stride, pad, ignore_border=False):
     assert inputX.ndim == 4
+    assert isinstance(pad, int)
     if isinstance(fsize, (int, float)): fsize = (int(fsize), int(fsize))
     if isinstance(stride, (int, float)): stride = (int(stride), int(stride))
-    Xrows, Xcols = inputX.shape[-2:]
     X = T.tensor4()
     if not ignore_border:  # 保持下和右的边界
+        rows, cols = inputX.shape[-2:]
+        rows, cols = rows + 2 * pad, cols + 2 * pad
         rowpad = colpad = 0
-        rowrem = (Xrows - fsize[0]) % stride[0]
+        rowrem = (rows - fsize[0]) % stride[0]
         if rowrem: rowpad = stride[0] - rowrem
-        colrem = (Xcols - fsize[1]) % stride[1]
+        colrem = (cols - fsize[1]) % stride[1]
         if colrem: colpad = stride[1] - colrem
-        pad = ((0, rowpad), (0, colpad))
+        pad = ((pad, pad + rowpad), (pad, pad + colpad))
     Xpad = lasagnepad(X, pad, batch_ndim=2)
     neibs = images2neibs(Xpad, fsize, stride, 'ignore_borders')
     im2colfn = theano.function([X], neibs, allow_input_downcast=True)
@@ -102,17 +104,19 @@ def im2col(inputX, fsize, stride, pad, ignore_border=False):
 # 根据图像的行列尺寸编译im2col函数,之后直接使用函数即可,比每次都编译速度快很多
 def im2col_compfn(shape, fsize, stride, pad, ignore_border=False):
     assert len(shape) == 2
+    assert isinstance(pad, int)
     if isinstance(fsize, (int, float)): fsize = (int(fsize), int(fsize))
     if isinstance(stride, (int, float)): stride = (int(stride), int(stride))
-    rows, cols = shape
     X = T.tensor4()
     if not ignore_border:  # 保持下和右的边界
+        rows, cols = shape
+        rows, cols = rows + 2 * pad, cols + 2 * pad
         rowpad = colpad = 0
         rowrem = (rows - fsize[0]) % stride[0]
         if rowrem: rowpad = stride[0] - rowrem
         colrem = (cols - fsize[1]) % stride[1]
         if colrem: colpad = stride[1] - colrem
-        pad = ((0, rowpad), (0, colpad))
+        pad = ((pad, pad + rowpad), (pad, pad + colpad))
     Xpad = lasagnepad(X, pad, batch_ndim=2)
     neibs = images2neibs(Xpad, fsize, stride, 'ignore_borders')
     im2colfn = theano.function([X], neibs, allow_input_downcast=True)
