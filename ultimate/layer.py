@@ -59,7 +59,7 @@ class ELMAELayer(Layer):
         batches = oneChannel.shape[0]
         patch_size = self.fsize ** 2
         # 生成随机正交滤波器
-        W, b = normal_random(input_unit=self.fsize ** 2, hidden_unit=self.n_hidden)
+        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden)
         W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
         # 卷积前向输出,和取patch时一致
         patches = self.im2colfn_getbeta(oneChannel)
@@ -90,6 +90,43 @@ class ELMAELayer(Layer):
         beta = beta.T
         return beta
 
+    def _get_beta_os(self, oneChannel, bias_scale=10, splits=10):
+        assert oneChannel.ndim == 4 and oneChannel.shape[1] == 1
+        batches = oneChannel.shape[0]
+        patch_size = self.fsize ** 2
+        # 生成随机正交滤波器
+        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden)
+        W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # 分为splits次训练
+        batch_size = int(round(float(batches) / splits))
+        if batch_size < self.n_hidden: batch_size = self.n_hidden
+        splits = int(np.ceil(float(batches) / batch_size))
+        for i in xrange(splits):
+            oneChanneltmp = oneChannel[:batch_size]
+            oneChannel = oneChannel[batch_size:]
+            batchestmp = oneChanneltmp.shape[0]
+            patches = self.im2colfn_getbeta(oneChanneltmp)
+            ##########################
+            patches = norm2d(patches)
+            # patches, self.mean1, self.P1 = whiten2d(patches)
+            ##########################
+            # 在patches上加噪
+            if self.noise_type == 'mn_array_edge':  # 需要原始图像
+                self.noise_args['originX'] = oneChanneltmp
+            noise_patches = np.copy(patches)
+            if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+                noise_patches = noise_patches.reshape((batchestmp, self.orows_, self.ocols_, self.fsize, self.fsize))
+            noise_patches = add_noise_decomp(noise_patches, self.noise_type, self.noise_args)
+            if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+                noise_patches = noise_patches.reshape((-1, patch_size))
+            if self.noise_type == 'mn_array_edge':  # 释放多余内存
+                self.noise_args['originX'] = None
+            del oneChanneltmp
+            K, beta = initial(noise_patches, patches, W, b, bias_scale, self.act_mode) if i == 0 \
+                else sequential(noise_patches, patches, W, b, K, beta, self.act_mode)
+        beta = beta.T
+        return beta
+
     def get_train_output_for(self, inputX):
         batches, channels, rows, cols = inputX.shape
         oshape_ = utils.basic.conv_out_shape((batches, channels, rows, cols),
@@ -111,7 +148,7 @@ class ELMAELayer(Layer):
             oneChannel = inputX[:, [0], :, :]
             inputX = inputX[:, 1:, :, :]
             utils.visual.save_map(oneChannel[[10, 100, 1000]], dir_name, 'elmin')
-            beta = self._get_beta(oneChannel)
+            beta = self._get_beta_os(oneChannel)
             utils.visual.save_beta(beta, dir_name, 'beta')
             patches = self.im2colfn_forward(oneChannel)
             del oneChannel
@@ -232,7 +269,7 @@ class ELMAECrossAllLayer(Layer):
         batches, channels = inputX.shape[:2]
         patch_size = self.fsize ** 2
         # 生成随机正交滤波器
-        W, b = normal_random(input_unit=channels * self.fsize ** 2, hidden_unit=self.n_hidden)
+        W, b = normal_random(input_unit=channels * patch_size, hidden_unit=self.n_hidden)
         W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
         # 将所有输入的通道的patch串联
         patches = im2col_catch_compiled(inputX, self.im2colfn_getbeta)
@@ -271,6 +308,54 @@ class ELMAECrossAllLayer(Layer):
         beta = beta.T
         return beta
 
+    def _get_beta_os(self, inputX, bias_scale=10, splits=10):
+        assert inputX.ndim == 4
+        batches, channels = inputX.shape[:2]
+        patch_size = self.fsize ** 2
+        # 生成随机正交滤波器
+        W, b = normal_random(input_unit=channels * patch_size, hidden_unit=self.n_hidden)
+        W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # 分为splits次训练
+        batch_size = int(round(float(batches) / splits))
+        if batch_size < self.n_hidden: batch_size = self.n_hidden
+        splits = int(np.ceil(float(batches) / batch_size))
+        for i in xrange(splits):
+            inputXtmp = inputX[:batch_size]
+            inputX = inputX[batch_size:]
+            batchestmp = inputXtmp.shape[0]
+            patches = im2col_catch_compiled(inputXtmp, self.im2colfn_getbeta)
+            ##########################
+            patches = norm2d(patches)
+            # patches, self.mean1, self.P1 = whiten2d(patches)
+            ##########################
+            # 在patches上加噪
+            if self.noise_type in ('mn_array_edge', 'mn_array_edge_mch'):  # 需要原始图像
+                self.noise_args['originX'] = inputXtmp
+            noise_patches = np.copy(patches)
+            if self.noise_type in ('mn_array_mch', 'mn_array_orient_mch', 'mn_array_edge_mch'):  # 6d
+                noise_patches = noise_patches.reshape((batchestmp, self.orows_, self.ocols_,
+                                                       channels, self.fsize, self.fsize))
+            elif self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):  # 5d
+                noise_patches = noise_patches.reshape((batchestmp, self.orows_, self.ocols_,
+                                                       channels, self.fsize, self.fsize))
+                noise_patches = noise_patches.transpose((0, 3, 1, 2, 4, 5))
+                noise_patches = noise_patches.reshape((-1, self.orows_, self.ocols_, self.fsize, self.fsize))
+            noise_patches = add_noise_decomp(noise_patches, self.noise_type, self.noise_args)
+            if self.noise_type in ('mn_array_mch', 'mn_array_orient_mch', 'mn_array_edge_mch'):
+                noise_patches = noise_patches.reshape((-1, channels * patch_size))
+            elif self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+                noise_patches = noise_patches.reshape((batchestmp, channels, self.orows_,
+                                                       self.ocols_, self.fsize, self.fsize))
+                noise_patches = noise_patches.transpose((0, 2, 3, 1, 4, 5))
+                noise_patches = noise_patches.reshape((-1, channels * patch_size))
+            if self.noise_type in ('mn_array_edge', 'mn_array_edge_mch'):
+                self.noise_args['originX'] = None
+            del inputXtmp
+            K, beta = initial(noise_patches, patches, W, b, bias_scale, self.act_mode) if i == 0 \
+                else sequential(noise_patches, patches, W, b, K, beta, self.act_mode)
+        beta = beta.T
+        return beta
+
     def forward_decomp(self, inputX, beta):
         assert inputX.ndim == 4
         batchSize = int(round(float(inputX.shape[0]) / 10))
@@ -302,7 +387,7 @@ class ELMAECrossAllLayer(Layer):
         self.im2colfn_forward = im2col_compfn((rows, cols), self.fsize, stride=self.stride,
                                               pad=self.pad, ignore_border=False)
         # 学习beta
-        self.beta = self._get_beta(inputX)
+        self.beta = self._get_beta_os(inputX)
         utils.visual.save_beta_mch(self.beta, channels, dir_name, 'beta')
         # 前向计算
         inputX = self.forward_decomp(inputX, self.beta)
@@ -380,7 +465,7 @@ class ELMAECrossPartLayer(Layer):
         batches, channels = partX.shape[:2]
         patch_size = self.fsize ** 2
         # 生成随机正交滤波器
-        W, b = normal_random(input_unit=channels * self.fsize ** 2, hidden_unit=self.n_hidden)
+        W, b = normal_random(input_unit=channels * patch_size, hidden_unit=self.n_hidden)
         W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
         # 将所有输入的通道的patch串联
         patches = im2col_catch_compiled(partX, self.im2colfn_getbeta)
@@ -416,6 +501,54 @@ class ELMAECrossPartLayer(Layer):
         hiddens = activate(hiddens, self.act_mode)
         # 计算beta
         beta = compute_beta_direct(hiddens, patches)
+        beta = beta.T
+        return beta
+
+    def _get_beta_os(self, partX, bias_scale=10, splits=10):
+        assert partX.ndim == 4
+        batches, channels = partX.shape[:2]
+        patch_size = self.fsize ** 2
+        # 生成随机正交滤波器
+        W, b = normal_random(input_unit=channels * patch_size, hidden_unit=self.n_hidden)
+        W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # 分为splits次训练
+        batch_size = int(round(float(batches) / splits))
+        if batch_size < self.n_hidden: batch_size = self.n_hidden
+        splits = int(np.ceil(float(batches) / batch_size))
+        for i in xrange(splits):
+            partXtmp = partX[:batch_size]
+            partX = partX[batch_size:]
+            batchestmp = partXtmp.shape[0]
+            patches = im2col_catch_compiled(partXtmp, self.im2colfn_getbeta)
+            ##########################
+            patches = norm2d(patches)
+            # patches, self.mean1, self.P1 = whiten2d(patches)
+            ##########################
+            # 在patches上加噪
+            if self.noise_type in ('mn_array_edge', 'mn_array_edge_mch'):  # 需要原始图像
+                self.noise_args['originX'] = partXtmp
+            noise_patches = np.copy(patches)
+            if self.noise_type in ('mn_array_mch', 'mn_array_orient_mch', 'mn_array_edge_mch'):  # 6d
+                noise_patches = noise_patches.reshape((batchestmp, self.orows_, self.ocols_,
+                                                       channels, self.fsize, self.fsize))
+            elif self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):  # 5d
+                noise_patches = noise_patches.reshape((batchestmp, self.orows_, self.ocols_,
+                                                       channels, self.fsize, self.fsize))
+                noise_patches = noise_patches.transpose((0, 3, 1, 2, 4, 5))
+                noise_patches = noise_patches.reshape((-1, self.orows_, self.ocols_, self.fsize, self.fsize))
+            noise_patches = add_noise_decomp(noise_patches, self.noise_type, self.noise_args)
+            if self.noise_type in ('mn_array_mch', 'mn_array_orient_mch', 'mn_array_edge_mch'):
+                noise_patches = noise_patches.reshape((-1, channels * patch_size))
+            elif self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+                noise_patches = noise_patches.reshape((batchestmp, channels, self.orows_,
+                                                       self.ocols_, self.fsize, self.fsize))
+                noise_patches = noise_patches.transpose((0, 2, 3, 1, 4, 5))
+                noise_patches = noise_patches.reshape((-1, channels * patch_size))
+            if self.noise_type in ('mn_array_edge', 'mn_array_edge_mch'):
+                self.noise_args['originX'] = None
+            del partXtmp
+            K, beta = initial(noise_patches, patches, W, b, bias_scale, self.act_mode) if i == 0 \
+                else sequential(noise_patches, patches, W, b, K, beta, self.act_mode)
         beta = beta.T
         return beta
 
@@ -459,7 +592,7 @@ class ELMAECrossPartLayer(Layer):
             inputX = inputX[:, self.cross_size:, :, :]
             utils.visual.save_map(partX[[10, 100, 1000]], dir_name, 'elmin')
             # 学习beta
-            beta = self._get_beta(partX)
+            beta = self._get_beta_os(partX)
             utils.visual.save_beta_mch(beta, self.cross_size, dir_name, 'beta')
             # 前向计算
             partX = self.forward_decomp(partX, beta)
@@ -867,7 +1000,12 @@ class CCCPLayer(Layer):
         W = orthonormalize(W)
         # 在转化的矩阵上加噪
         noiseX = np.copy(inputX)
-        if self.noise_type == 'mn_array_edge':  # 需要原始图像
+        ##################
+        noiseX = noiseX.reshape((-1, n_in))
+        noiseX = norm2d(noiseX)
+        noiseX = noiseX.reshape((batches, rows, cols, n_in))
+        ##################
+        if self.noise_type == 'mn_array_edge':  # 需要归一化之前的原始图像
             inputX = inputX.transpose((0, 3, 1, 2))
             self.noise_args['originX'] = inputX  # 使用同样的inputX减少内存
         noiseX = add_noise_decomp(noiseX, self.noise_type, self.noise_args)
@@ -876,6 +1014,9 @@ class CCCPLayer(Layer):
             inputX = inputX.transpose((0, 2, 3, 1))
             self.noise_args['originX'] = None
         inputX = inputX.reshape((-1, n_in))
+        ##################
+        inputX = norm2d(inputX)
+        ##################
         H = np.dot(noiseX, W)
         del noiseX
         hmax, hmin = np.max(H, axis=0), np.min(H, axis=0)
@@ -886,16 +1027,51 @@ class CCCPLayer(Layer):
         beta = beta.T
         return beta
 
+    def _get_beta_os(self, inputX, bias_scale=25, splits=10):
+        assert inputX.ndim == 4
+        batches, rows, cols, n_in = inputX.shape
+        W, b = normal_random(input_unit=n_in, hidden_unit=self.n_out)
+        W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # 分为splits次训练
+        batch_size = int(round(float(batches) / splits))
+        if batch_size < self.n_out: batch_size = self.n_out
+        splits = int(np.ceil(float(batches) / batch_size))
+        for i in xrange(splits):
+            inputXtmp = inputX[:batch_size]
+            inputX = inputX[batch_size:]
+            # 在转化的矩阵上加噪
+            noiseXtmp = np.copy(inputXtmp)
+            ##################
+            noiseXtmp = noiseXtmp.reshape((-1, n_in))
+            noiseXtmp = norm2d(noiseXtmp)
+            noiseXtmp = noiseXtmp.reshape((-1, rows, cols, n_in))
+            ##################
+            if self.noise_type == 'mn_array_edge':  # 需要归一化之前的原始图像
+                inputXtmp = inputXtmp.transpose((0, 3, 1, 2))
+                self.noise_args['originX'] = inputXtmp  # 使用同样的inputX减少内存
+            noiseXtmp = add_noise_decomp(noiseXtmp, self.noise_type, self.noise_args)
+            noiseXtmp = noiseXtmp.reshape((-1, n_in))
+            if self.noise_type == 'mn_array_edge':  # 还原原始图像
+                inputXtmp = inputXtmp.transpose((0, 2, 3, 1))
+                self.noise_args['originX'] = None
+            inputXtmp = inputXtmp.reshape((-1, n_in))
+            ##################
+            inputXtmp = norm2d(inputXtmp)
+            ##################
+            K, beta = initial(noiseXtmp, inputXtmp, W, b, bias_scale, self.act_mode) if i == 0 \
+                else sequential(noiseXtmp, inputXtmp, W, b, K, beta, self.act_mode)
+        beta = beta.T
+        return beta
+
     def get_train_output_for(self, inputX):
         utils.visual.save_map(inputX[[10, 100, 1000]], dir_name, 'cccpin')
         batches, n_in, rows, cols = inputX.shape
+        inputX = inputX.transpose((0, 2, 3, 1))
+        self.beta = self._get_beta_os(inputX)
+        inputX = inputX.reshape((-1, n_in))
         ##################
-        inputX = inputX.transpose((0, 2, 3, 1)).reshape((-1, n_in))
         inputX = norm2d(inputX)
         ##################
-        inputX = inputX.reshape((batches, rows, cols, -1))
-        self.beta = self._get_beta(inputX)
-        inputX = inputX.reshape((-1, n_in))
         # 前向计算
         inputX = np.dot(inputX, self.beta)
         inputX = inputX.reshape((batches, rows, cols, -1)).transpose((0, 3, 1, 2))

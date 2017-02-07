@@ -6,8 +6,9 @@ import theano
 import theano.tensor as T
 from theano.sandbox.neighbours import images2neibs
 from lasagne.theano_extensions.padding import pad as lasagnepad
+from act import *
 
-__all__ = ['compute_beta_direct', 'compute_beta_rand',
+__all__ = ['compute_beta_direct', 'compute_beta_rand', 'initial', 'sequential',
            'orthonormalize',
            'normal_random', 'uniform_random',
            'im2col', 'im2col_compfn',
@@ -41,6 +42,29 @@ def compute_beta_direct(Hmat, Tmat):
     else:
         beta = solve(np.dot(Hmat.T, Hmat), np.dot(Hmat.T, Tmat))
     return beta
+
+
+def initial(inputX0, inputy0, W, b, bias_scale, act_mode):
+    H0 = np.dot(inputX0, W)
+    assert H0.shape[0] >= H0.shape[1]  # 只允许行大于列
+    del inputX0
+    hmax, hmin = np.max(H0, axis=0), np.min(H0, axis=0)
+    scale = (hmax - hmin) / (2 * bias_scale)
+    b *= scale  # 只在初始化中原位调整b
+    H0 += b
+    H0 = activate(H0, act_mode)
+    K = H0.T.dot(H0)
+    beta = solve(K, H0.T.dot(inputy0))
+    return K, beta
+
+
+def sequential(inputX, inputy, W, b, K, beta, act_mode):
+    H1 = np.dot(inputX, W) + b
+    del inputX
+    H1 = activate(H1, act_mode)
+    K += H1.T.dot(H1)
+    beta += solve(K, H1.T.dot(inputy - H1.dot(beta)))
+    return K, beta
 
 
 ########################################################################################################################
