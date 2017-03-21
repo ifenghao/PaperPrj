@@ -3,10 +3,10 @@ import gc
 import numpy as np
 from numpy.linalg import solve
 from copy import copy, deepcopy
-from util import *
-from act import *
+from sklearn import svm
+from multiprocessing import Pool, cpu_count
 
-__all__ = ['Layer', 'Classifier_ELMtimescv', 'Classifier_KELMcv']
+__all__ = ['Layer', 'Classifier_SVMlincv', 'Classifier_SVMlincv_jobs']
 
 
 ########################################################################################################################
@@ -47,114 +47,236 @@ def accuracy(ypred, ytrue):
 ########################################################################################################################
 
 
-class Classifier_ELM(Layer):
-    def __init__(self, act_mode, C, n_times):
-        self.act_mode = act_mode
+class Classifier_SVMlin(CVInner):
+    def __init__(self, C, tol):
         self.C = C
-        self.n_times = n_times
-
-    def get_train_output_for(self, inputX, inputy=None):
-        n_hidden = int(self.n_times * inputX.shape[1])
-        self.W, self.b = normal_random(input_unit=inputX.shape[1], hidden_unit=n_hidden)
-        self.W = orthonormalize(self.W)
-        self.b = orthonormalize(self.b)
-        H = np.dot(inputX, self.W) + self.b
-        del inputX
-        H = activate(H, self.act_mode)
-        self.beta = compute_beta_rand(H, inputy, self.C)
-        out = np.dot(H, self.beta)
-        return out
-
-    def get_test_output_for(self, inputX):
-        H = np.dot(inputX, self.W) + self.b
-        del inputX
-        H = activate(H, self.act_mode)
-        out = np.dot(H, self.beta)
-        return out
-
-
-class Classifier_ELMcv(CVInner):
-    def __init__(self, act_mode, C_range, n_times):
-        self.act_mode = act_mode
-        self.C_range = C_range
-        self.n_times = n_times
+        self.tol = tol
 
     def get_train_acc(self, inputX, inputy):
-        n_hidden = int(self.n_times * inputX.shape[1])
-        print 'hiddens =', n_hidden
-        self.W, self.b = normal_random(input_unit=inputX.shape[1], hidden_unit=n_hidden)
-        self.W = orthonormalize(self.W)
-        self.b = orthonormalize(self.b)
-        H = np.dot(inputX, self.W) + self.b
-        del inputX
-        H = activate(H, self.act_mode)
-        rows, cols = H.shape
-        K = np.dot(H, H.T) if rows <= cols else np.dot(H.T, H)
-        self.beta_list = []
-        optacc = 0.
-        optC = None
-        for C in self.C_range:
-            Crand = abs(np.random.uniform(0.1, 1.1)) * C
-            beta = np.dot(H.T, solve(np.eye(rows) / Crand + K, inputy)) if rows <= cols \
-                else solve(np.eye(cols) / Crand + K, np.dot(H.T, inputy))
-            out = np.dot(H, beta)
-            acc = accuracy(out, inputy)
-            self.beta_list.append(copy(beta))
-            print '\t', C, acc
-            if acc > optacc:
-                optacc = acc
-                optC = C
-        return optC, optacc
+        dual = inputX.shape[0] < inputX.shape[1]
+        self.clf = svm.LinearSVC(C=self.C, dual=dual, max_iter=10 ** 8, penalty='l2', loss='squared_hinge',
+                                 tol=self.tol, multi_class='ovr', fit_intercept=True, intercept_scaling=1)
+        # self.clf = svm.SVC(C=self.C, kernel='linear')
+        self.clf.fit(inputX, inputy)
+        return self.clf.score(inputX, inputy)
 
     def get_test_acc(self, inputX, inputy):
-        H = np.dot(inputX, self.W) + self.b
-        del inputX
-        H = activate(H, self.act_mode)
+        return self.clf.score(inputX, inputy)
+
+
+class Classifier_SVMlincv(CVOuter):
+    def __init__(self, C_range, tol):
+        self.C_range = C_range
+        self.tol = tol
+
+    def train_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
         optacc = 0.
         optC = None
-        for beta, C in zip(self.beta_list, self.C_range):
-            out = np.dot(H, beta)
-            acc = accuracy(out, inputy)
+        self.clf_list = []
+        for C in self.C_range:
+            clf = Classifier_SVMlin(C, self.tol)
+            acc = clf.get_train_acc(inputX, inputy)
+            self.clf_list.append(deepcopy(clf))
             print '\t', C, acc
             if acc > optacc:
                 optacc = acc
                 optC = C
-        return optC, optacc
-
-
-class Classifier_ELMtimescv(CVOuter):
-    def __init__(self, act_mode, n_rep, C_range, times_range):
-        self.act_mode = act_mode
-        self.C_range = C_range
-        self.n_rep = n_rep
-        self.times_range = times_range
-        self.clf_list = []
-
-    def train_cv(self, inputX, inputy):
-        optacc = 0.
-        optC = None
-        for n_times in self.times_range:
-            print 'times', n_times, ':'
-            for j in xrange(self.n_rep):
-                print 'repeat', j
-                clf = Classifier_ELMcv(self.act_mode, self.C_range, n_times)
-                C, acc = clf.get_train_acc(inputX, inputy)
-                self.clf_list.append(deepcopy(clf))
-                if acc > optacc:
-                    optacc = acc
-                    optC = C
-            print 'train opt', optC, optacc
+        print 'train opt', optC, optacc
 
     def test_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
         optacc = 0.
         optC = None
         for clf in self.clf_list:
-            print 'times', clf.n_times, ':'
-            C, acc = clf.get_test_acc(inputX, inputy)
+            acc = clf.get_test_acc(inputX, inputy)
+            print '\t', clf.C, acc
             if acc > optacc:
                 optacc = acc
-                optC = C
-            print 'test opt', optC, optacc
+                optC = clf.C
+        print 'test opt', optC, optacc
+
+
+def train_lin_job(C, tol, inputX, inputy):
+    clf = Classifier_SVMlin(C, tol)
+    acc = clf.get_train_acc(inputX, inputy)
+    return clf, acc
+
+
+def test_lin_job(clf, inputX, inputy):
+    acc = clf.get_test_acc(inputX, inputy)
+    return clf, acc
+
+
+class Classifier_SVMlincv_jobs(CVOuter):
+    def __init__(self, C_range, tol):
+        self.C_range = C_range
+        self.tol = tol
+
+    def train_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        pool = Pool(processes=cpu_count())
+        jobs = []
+        for C in self.C_range:
+            jobs.append(pool.apply_async(train_lin_job, (C, self.tol, inputX, inputy)))
+        pool.close()
+        pool.join()
+        optacc = 0.
+        optC = None
+        self.clf_list = []
+        for one_job in jobs:
+            clf, acc = one_job.get()
+            self.clf_list.append(deepcopy(clf))
+            print '\t', clf.C, acc
+            if acc > optacc:
+                optacc = acc
+                optC = clf.C
+        print 'train opt', optC, optacc
+
+    def test_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        optacc = 0.
+        optC = None
+        for clf in self.clf_list:
+            acc = clf.get_test_acc(inputX, inputy)
+            print '\t', clf.C, acc
+            if acc > optacc:
+                optacc = acc
+                optC = clf.C
+        print 'test opt', optC, optacc
+
+    def _test_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        pool = Pool(processes=cpu_count())
+        jobs = []
+        for clf in self.clf_list:
+            jobs.append(pool.apply_async(test_lin_job, (clf, inputX, inputy)))
+        pool.close()
+        pool.join()
+        optacc = 0.
+        optC = None
+        for one_job in jobs:
+            clf, acc = one_job.get()
+            print '\t', clf.C, acc
+            if acc > optacc:
+                optacc = acc
+                optC = clf.C
+        print 'test opt', optC, optacc
+
+
+########################################################################################################################
+
+
+class Classifier_SVMrbf(CVInner):
+    def __init__(self, C, gamma):
+        self.C = C
+        self.gamma = gamma
+
+    def get_train_acc(self, inputX, inputy):
+        self.clf = svm.SVC(C=self.C, gamma=self.gamma, kernel='rbf')
+        self.clf.fit(inputX, inputy)
+        return self.clf.score(inputX, inputy)
+
+    def get_test_acc(self, inputX, inputy):
+        return self.clf.score(inputX, inputy)
+
+
+class Classifier_SVMrbfcv(CVOuter):
+    def __init__(self, C_range, gamma_range):
+        self.C_range = C_range
+        self.gamma_range = gamma_range
+
+    def train_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        optacc = 0.
+        optC = None
+        optgamma = None
+        self.clf_list = []
+        for gamma in self.gamma_range:
+            for C in self.C_range:
+                clf = Classifier_SVMrbf(C, gamma)
+                acc = clf.get_train_acc(inputX, inputy)
+                self.clf_list.append(deepcopy(clf))
+                print '\t', gamma, C, acc
+                if acc > optacc:
+                    optacc = acc
+                    optgamma = gamma
+                    optC = C
+        print 'train opt', optgamma, optC, optacc
+
+    def test_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        optacc = 0.
+        optC = None
+        optgamma = None
+        for clf in self.clf_list:
+            acc = clf.get_test_acc(inputX, inputy)
+            print '\t', clf.gamma, clf.C, acc
+            if acc > optacc:
+                optacc = acc
+                optgamma = clf.gamma
+                optC = clf.C
+        print 'test opt', optgamma, optC, optacc
+
+
+def train_rbf_job(C, gamma, inputX, inputy):
+    clf = Classifier_SVMrbf(C, gamma)
+    acc = clf.get_train_acc(inputX, inputy)
+    return clf, acc
+
+
+def test_rbf_job(clf, inputX, inputy):
+    acc = clf.get_test_acc(inputX, inputy)
+    return clf, acc
+
+
+class Classifier_SVMrbfcv_jobs(CVOuter):
+    def __init__(self, C_range, gamma_range):
+        self.C_range = C_range
+        self.gamma_range = gamma_range
+
+    def train_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        pool = Pool(processes=cpu_count())
+        jobs = []
+        for gamma in self.gamma_range:
+            for C in self.C_range:
+                jobs.append(pool.apply_async(train_rbf_job, (C, gamma, inputX, inputy)))
+        pool.close()
+        pool.join()
+        optacc = 0.
+        optC = None
+        optgamma = None
+        self.clf_list = []
+        for one_job in jobs:
+            clf, acc = one_job.get()
+            self.clf_list.append(deepcopy(clf))
+            print '\t', clf.gamma, clf.C, acc
+            if acc > optacc:
+                optacc = acc
+                optgamma = clf.gamma
+                optC = clf.C
+        print 'train opt', optgamma, optC, optacc
+
+    def test_cv(self, inputX, inputy):
+        if inputy.ndim == 2: inputy = np.argmax(inputy, axis=1)
+        pool = Pool(processes=cpu_count())
+        jobs = []
+        for clf in self.clf_list:
+            jobs.append(pool.apply_async(test_rbf_job, (clf, inputX, inputy)))
+        pool.close()
+        pool.join()
+        optacc = 0.
+        optC = None
+        optgamma = None
+        for one_job in jobs:
+            clf, acc = one_job.get()
+            print '\t', clf.gamma, clf.C, acc
+            if acc > optacc:
+                optacc = acc
+                optgamma = clf.gamma
+                optC = clf.C
+        print 'test opt', optgamma, optC, optacc
 
 
 ########################################################################################################################

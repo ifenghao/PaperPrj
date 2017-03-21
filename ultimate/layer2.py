@@ -12,7 +12,7 @@ from noise import *
 from pool import *
 from act import *
 
-__all__ = ['ELMAELayer', 'ELMAECrossAllLayer', 'ELMAECrossPartLayer',
+__all__ = ['ELMAELayer', 'ELMAEGenLayer', 'ELMAECrossAllLayer', 'ELMAECrossPartLayer',
            'ELMAEMBetaLayer',
            'PoolLayer', 'SPPLayer', 'BNLayer', 'GCNLayer', 'MergeLayer', 'VerticalLayer',
            'CCCPLayer', 'CCCPMBetaLayer']
@@ -32,7 +32,8 @@ class Layer(object):
 class ELMAELayer(Layer):
     def __init__(self, C, name, n_hidden, act_mode, fsize, pad, stride, pad_, stride_,
                  noise_type, noise_args, pool_type, pool_size, mode, pool_args, add_pool,
-                 cccp_out, cccp_noise_type, cccp_noise_args, add_cccp, ccsize, beta_os, splits):
+                 cccp_out, cccp_noise_type, cccp_noise_args, add_cccp, ccsize, beta_os, splits,
+                 W_b):
         global dir_name
         dir_name = name
         self.C = C
@@ -57,13 +58,14 @@ class ELMAELayer(Layer):
         self.ccsize = ccsize
         self.beta_os = beta_os
         self.splits = splits
+        self.W_b = W_b
 
     def _get_beta(self, onechX, bias_scale=25):
         assert onechX.ndim == 4 and onechX.shape[1] == 1  # ELMAE的输入通道数必须为1,即只有一张特征图
         batches = onechX.shape[0]
         patch_size = self.fsize ** 2
         # 生成随机正交滤波器
-        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden)
+        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden) if self.W_b is None else self.W_b
         W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
         # 将特征图转化为patch
         patches = self.im2colfn_getbeta(onechX)
@@ -90,7 +92,7 @@ class ELMAELayer(Layer):
         hiddens += b * scale
         hiddens = activate(hiddens, self.act_mode)
         # 计算beta
-        beta = compute_beta_reg(hiddens, patches, self.C)
+        beta = compute_beta_direct(hiddens, patches)
         beta = beta.T
         return beta
 
@@ -99,7 +101,7 @@ class ELMAELayer(Layer):
         batches = onechX.shape[0]
         patch_size = self.fsize ** 2
         # 生成随机正交滤波器
-        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden)
+        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden) if self.W_b is None else self.W_b
         W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
         # 分为splits次训练
         batch_size = int(round(float(batches) / self.splits))
@@ -252,6 +254,214 @@ class ELMAELayer(Layer):
         return output
 
 
+class ELMAEGenLayer(Layer):
+    def __init__(self, C, name, n_hidden, act_mode, fsize, pad, stride, pad_, stride_,
+                 noise_type, noise_args, pool_type, pool_size, mode, pool_args, add_pool,
+                 cccp_out, cccp_noise_type, cccp_noise_args, add_cccp, beta_os, splits, W_b):
+        global dir_name
+        dir_name = name
+        self.C = C
+        self.n_hidden = n_hidden
+        self.act_mode = act_mode
+        self.fsize = fsize
+        self.stride = stride
+        self.pad = pad
+        self.stride_ = stride_
+        self.pad_ = pad_
+        self.noise_type = noise_type  # 不允许为mch
+        self.noise_args = noise_args
+        self.pool_type = pool_type
+        self.pool_size = pool_size
+        self.mode = mode
+        self.pool_args = pool_args
+        self.add_pool = add_pool
+        self.cccp_out = cccp_out
+        self.cccp_noise_type = cccp_noise_type
+        self.cccp_noise_args = cccp_noise_args
+        self.add_cccp = add_cccp
+        self.beta_os = beta_os
+        self.splits = splits
+        self.W_b = W_b
+
+    def _get_beta(self, onechX, bias_scale=25):
+        assert onechX.ndim == 4 and onechX.shape[1] == 1  # ELMAE的输入通道数必须为1,即只有一张特征图
+        batches = onechX.shape[0]
+        patch_size = self.fsize ** 2
+        # 生成随机正交滤波器
+        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden) if self.W_b is None else self.W_b
+        W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # 将特征图转化为patch
+        patches = self.im2colfn_getbeta(onechX)
+        ##########################
+        patches = norm2d(patches)
+        # patches, self.mean1, self.P1 = whiten2d(patches)
+        ##########################
+        # 在patches上加噪
+        if self.noise_type == 'mn_array_edge':  # 需要原始图像
+            self.noise_args['originX'] = onechX
+        noise_patches = np.copy(patches)
+        if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+            noise_patches = noise_patches.reshape((batches, self.orows_, self.ocols_, self.fsize, self.fsize))
+        noise_patches = add_noise_decomp(noise_patches, self.noise_type, self.noise_args)
+        if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+            noise_patches = noise_patches.reshape((-1, patch_size))
+        if self.noise_type == 'mn_array_edge':  # 释放多余内存
+            self.noise_args['originX'] = None
+        del onechX
+        hiddens = np.dot(noise_patches, W)
+        del noise_patches
+        hmax, hmin = np.max(hiddens, axis=0), np.min(hiddens, axis=0)
+        scale = (hmax - hmin) / (2 * bias_scale)
+        hiddens += b * scale
+        hiddens = activate(hiddens, self.act_mode)
+        # 计算beta
+        beta = compute_beta_direct(hiddens, patches)
+        beta = beta.T
+        return beta
+
+    def _get_beta_os(self, onechX, bias_scale=25):
+        assert onechX.ndim == 4 and onechX.shape[1] == 1
+        batches = onechX.shape[0]
+        patch_size = self.fsize ** 2
+        # 生成随机正交滤波器
+        W, b = normal_random(input_unit=patch_size, hidden_unit=self.n_hidden) if self.W_b is None else self.W_b
+        W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # 分为splits次训练
+        batch_size = int(round(float(batches) / self.splits))
+        splits = int(np.ceil(float(batches) / batch_size))
+        for i in xrange(splits):
+            onechXtmp = onechX[:batch_size]
+            onechX = onechX[batch_size:]
+            batchestmp = onechXtmp.shape[0]
+            patches = self.im2colfn_getbeta(onechXtmp)
+            ##########################
+            patches = norm2d(patches)
+            # patches, self.mean1, self.P1 = whiten2d(patches)
+            ##########################
+            # 在patches上加噪
+            if self.noise_type == 'mn_array_edge':  # 需要原始图像
+                self.noise_args['originX'] = onechXtmp
+            noise_patches = np.copy(patches)
+            if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+                noise_patches = noise_patches.reshape((batchestmp, self.orows_, self.ocols_, self.fsize, self.fsize))
+            noise_patches = add_noise_decomp(noise_patches, self.noise_type, self.noise_args)
+            if self.noise_type in ('mn_array', 'mn_array_orient', 'mn_array_edge'):
+                noise_patches = noise_patches.reshape((-1, patch_size))
+            if self.noise_type == 'mn_array_edge':  # 释放多余内存
+                self.noise_args['originX'] = None
+            del onechXtmp
+            K, beta = initial(noise_patches, patches, W, b, bias_scale, self.act_mode) if i == 0 \
+                else sequential(noise_patches, patches, W, b, K, beta, self.act_mode)
+        beta = beta.T
+        return beta
+
+    def onech_gen(self, onechX, beta):
+        channels = beta.shape[1]
+        for i in xrange(channels):
+            patches = self.im2colfn_forward(onechX)
+            ##########################
+            patches = norm2d(patches)
+            # patches = whiten2d(patches, self.mean1, self.P1)
+            ##########################
+            patches = np.dot(patches, beta[:, [i]])
+            patches = patches.reshape((-1, self.orows, self.ocols, 1)).transpose((0, 3, 1, 2))
+            if visualize: utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmraw')
+            yield patches
+
+    def get_train_output_for(self, inputX):
+        batches, channels, rows, cols = inputX.shape
+        oshape_ = utils.basic.conv_out_shape((batches, channels, rows, cols),
+                                             (self.n_hidden, channels, self.fsize, self.fsize),
+                                             pad=self.pad_, stride=self.stride_, ignore_border=False)
+        self.orows_, self.ocols_ = oshape_[-2:]
+        oshape = utils.basic.conv_out_shape((batches, channels, rows, cols),
+                                            (self.n_hidden, channels, self.fsize, self.fsize),
+                                            pad=self.pad, stride=self.stride, ignore_border=False)
+        self.orows, self.ocols = oshape[-2:]
+        self.im2colfn_getbeta = im2col_compfn((rows, cols), self.fsize, stride=self.stride_,
+                                              pad=self.pad_, ignore_border=False)
+        self.im2colfn_forward = im2col_compfn((rows, cols), self.fsize, stride=self.stride,
+                                              pad=self.pad, ignore_border=False)
+        self.filters = []
+        self.cccps = []
+        gens = []
+        output = []
+        for ch in xrange(channels):
+            onechX = inputX[:, [0], :, :]
+            inputX = inputX[:, 1:, :, :]
+            if visualize: utils.visual.save_map(onechX[[10, 100, 1000]], dir_name, 'elmin')
+            beta = self._get_beta_os(onechX) if self.beta_os else self._get_beta(onechX)
+            self.filters.append(copy(beta))
+            if visualize: utils.visual.save_beta(beta, dir_name, 'beta')
+            gen = self.onech_gen(onechX, beta)
+            gens.append(gen)
+            print ch,
+        for ch in xrange(self.n_hidden):
+            patches = []
+            for gen in gens:
+                onech_patches = gen.next()
+                patches = np.concatenate([patches, onech_patches], axis=1) if len(patches) != 0 else onech_patches
+            # 归一化
+            # patches = norm4d(patches)
+            # utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmnorm')
+            # 激活
+            patches = activate(patches, self.act_mode)
+            if visualize: utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmrelu')
+            # 添加cccp层组合
+            if self.add_cccp:
+                cccp = CCCPLayer(C=self.C, name=dir_name, n_out=self.cccp_out, act_mode=self.act_mode,
+                                 noise_type=self.cccp_noise_type, noise_args=self.cccp_noise_args,
+                                 beta_os=self.beta_os, splits=self.splits)
+                patches = cccp.get_train_output_for(patches)
+                self.cccps.append(deepcopy(cccp))
+            # 池化
+            if self.add_pool:
+                patches = pool_op(patches, self.pool_size, self.pool_type, self.mode, self.pool_args)
+                if visualize: utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmpool')
+            # 组合最终结果
+            output = np.concatenate([output, patches], axis=1) if len(output) != 0 else patches
+            print ch,
+            gc.collect()
+        return output
+
+    def get_test_output_for(self, inputX):
+        batches, channels, rows, cols = inputX.shape
+        filter_iter = iter(self.filters)
+        cccps_iter = iter(self.cccps)
+        gens = []
+        output = []
+        for ch in xrange(channels):
+            onechX = inputX[:, [0], :, :]
+            inputX = inputX[:, 1:, :, :]
+            if visualize: utils.visual.save_map(onechX[[10, 100, 1000]], dir_name, 'elminte')
+            gen = self.onech_gen(onechX, filter_iter.next())
+            gens.append(gen)
+            print ch,
+        for ch in xrange(self.n_hidden):
+            patches = []
+            for gen in gens:
+                onech_patches = gen.next()
+                patches = np.concatenate([patches, onech_patches], axis=1) if len(patches) != 0 else onech_patches
+            # 归一化
+            # patches = norm4d(patches)
+            # utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmnorm')
+            # 激活
+            patches = activate(patches, self.act_mode)
+            if visualize: utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmrelu')
+            # 添加cccp层组合
+            if self.add_cccp:
+                patches = cccps_iter.next().get_test_output_for(patches)
+            # 池化
+            if self.add_pool:
+                patches = pool_op(patches, self.pool_size, self.pool_type, self.mode, self.pool_args)
+                if visualize: utils.visual.save_map(patches[[10, 100, 1000]], dir_name, 'elmpoolte')
+            # 组合最终结果
+            output = np.concatenate([output, patches], axis=1) if len(output) != 0 else patches
+            print ch,
+            gc.collect()
+        return output
+
+
 def im2col_catch(inputX, fsize, stride, pad, ignore_border=False):
     assert inputX.ndim == 4
     patches = []
@@ -340,7 +550,7 @@ class ELMAECrossAllLayer(Layer):
         hiddens += b * scale
         hiddens = activate(hiddens, self.act_mode)
         # 计算beta
-        beta = compute_beta_reg(hiddens, patches, self.C)
+        beta = compute_beta_direct(hiddens, patches)
         beta = beta.T
         return beta
 
@@ -538,7 +748,7 @@ class ELMAECrossPartLayer(Layer):
         hiddens += b * scale
         hiddens = activate(hiddens, self.act_mode)
         # 计算beta
-        beta = compute_beta_reg(hiddens, patches, self.C)
+        beta = compute_beta_direct(hiddens, patches)
         beta = beta.T
         return beta
 
@@ -825,7 +1035,7 @@ class ELMAEMBetaLayer(Layer):
         hiddens += b * scale
         hiddens = activate(hiddens, self.act_mode)
         # 计算beta
-        beta = compute_beta_reg(hiddens, part_patches, self.C)
+        beta = compute_beta_direct(hiddens, part_patches)
         beta = beta.T
         return beta
 
@@ -975,11 +1185,11 @@ class BNLayer(Layer):
 
 
 class GCNLayer(Layer):
-    def get_train_output_for(self, inputX, reg=0.1):
-        return norm(inputX, reg)
+    def get_train_output_for(self, inputX, regularization=0.1):
+        return norm(inputX, regularization)
 
-    def get_test_output_for(self, inputX, reg=0.1):
-        return norm(inputX, reg)
+    def get_test_output_for(self, inputX, regularization=0.1):
+        return norm(inputX, regularization)
 
 
 class MergeLayer(Layer):
@@ -1076,12 +1286,23 @@ class CCCPLayer(Layer):
         self.noise_args = noise_args
         self.beta_os = beta_os
         self.splits = splits
+        # self.pre_pool = pre_pool
+        # self.pre_pool_size = pre_pool_size
+        # self.pre_pool_type = pre_pool_type
+        # self.pre_mode = pre_mode
+        # self.pre_pool_args = pre_pool_args
 
     def _get_beta(self, inputX, bias_scale=25):
         assert inputX.ndim == 4
         batches, rows, cols, n_in = inputX.shape
         W, b = normal_random(input_unit=n_in, hidden_unit=self.n_out)
         W = orthonormalize(W)
+        # 池化
+        # if self.pre_pool:
+        #     inputX = inputX.transpose((0, 3, 1, 2))
+        #     inputX = pool_op(inputX, self.pre_pool_size, self.pre_pool_type, self.pre_mode, self.pre_pool_args)
+        #     inputX = inputX.transpose((0, 2, 3, 1))
+        #     batches, rows, cols, n_in = inputX.shape
         # 在转化的矩阵上加噪
         noiseX = np.copy(inputX)
         ##################
@@ -1107,7 +1328,7 @@ class CCCPLayer(Layer):
         scale = (hmax - hmin) / (2 * bias_scale)
         H += b * scale
         H = activate(H, self.act_mode)
-        beta = compute_beta_reg(H, inputX, self.C)
+        beta = compute_beta_direct(H, inputX)
         beta = beta.T
         return beta
 
@@ -1116,6 +1337,11 @@ class CCCPLayer(Layer):
         batches, rows, cols, n_in = inputX.shape
         W, b = normal_random(input_unit=n_in, hidden_unit=self.n_out)
         W = orthonormalize(W)  # 正交后的幅度在-1~+1之间
+        # # 池化
+        # if self.pre_pool:
+        #     inputX = inputX.transpose((0, 3, 1, 2))
+        #     inputX = pool_op(inputX, self.pre_pool_size, self.pre_pool_type, self.pre_mode, self.pre_pool_args)
+        #     inputX = inputX.transpose((0, 2, 3, 1))
         # 分为splits次训练
         batch_size = int(round(float(batches) / self.splits))
         splits = int(np.ceil(float(batches) / batch_size))
@@ -1222,7 +1448,7 @@ class CCCPMBetaLayer(Layer):
         scale = (hmax - hmin) / (2 * bias_scale)
         H += b * scale
         H = activate(H, self.act_mode)
-        beta = compute_beta_reg(H, partX, self.C)
+        beta = compute_beta_direct(H, partX)
         beta = beta.T
         return beta
 

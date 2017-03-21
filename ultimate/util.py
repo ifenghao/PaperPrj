@@ -8,12 +8,13 @@ from theano.sandbox.neighbours import images2neibs
 from lasagne.theano_extensions.padding import pad as lasagnepad
 from act import *
 
-__all__ = ['compute_beta_direct', 'compute_beta_rand', 'initial', 'sequential',
+__all__ = ['compute_beta_direct', 'compute_beta_reg', 'compute_beta_rand',
+           'initial', 'sequential',
            'orthonormalize',
            'normal_random', 'uniform_random',
            'im2col', 'im2col_compfn',
-           'norm2d', 'norm4d', 'norm2dglobal', 'norm4dglobal',
-           'whiten2d', 'whiten2d']
+           'norm', 'norm2d', 'norm2dglobal', 'norm4dglobal',
+           'whiten', 'whiten2d']
 
 splits = 2
 
@@ -150,6 +151,16 @@ def im2col_compfn(shape, fsize, stride, pad, ignore_border=False):
 ########################################################################################################################
 
 
+def norm(X, reg=0.1):
+    raw_shape = X.shape
+    if len(raw_shape) > 2:
+        X = X.reshape((raw_shape[0], -1))
+    X = norm2d(X, reg)
+    if len(raw_shape) > 2:
+        X = X.reshape(raw_shape)
+    return X
+
+
 # 对每一个patch里的元素去均值归一化
 def norm2d(X, reg=0.1):
     size = X.shape[0]
@@ -166,15 +177,6 @@ def norm2d(X, reg=0.1):
         normalizer = np.sqrt((Xtmp ** 2).mean(axis=1) + reg)
         Xtmp /= normalizer[:, None]
         X[start:end] = Xtmp
-    return X
-
-
-# 对每一个样本的每个通道元素去均值归一化
-def norm4d(X, reg=0.1):
-    raw_shape = X.shape
-    X = X.reshape((X.shape[0], -1))
-    X = norm2d(X, reg)
-    X = X.reshape(raw_shape)
     return X
 
 
@@ -224,6 +226,17 @@ def norm4dglobal(X, mean=None, normalizer=None, reg=0.1):
         return X
 
 
+def whiten(X, mean=None, P=None):
+    raw_shape = X.shape
+    if len(raw_shape) > 2:
+        X = X.reshape((raw_shape[0], -1))
+    tup = whiten2d(X, mean, P)
+    lst = list(tup)
+    if len(raw_shape) > 2:
+        lst[0] = lst[0].reshape(raw_shape)
+    return lst
+
+
 def whiten2d(X, mean=None, P=None):
     if mean is None or P is None:
         mean = X.mean(axis=0)
@@ -233,28 +246,7 @@ def whiten2d(X, mean=None, P=None):
         reg = np.mean(D)
         P = V.dot(np.diag(np.sqrt(1 / (D + reg)))).dot(V.T)
         X = X.dot(P)
-        return X, mean, P
     else:
         X -= mean
         X = X.dot(P)
-        return X
-
-
-def whiten4d(X, mean=None, P=None):
-    raw_shape = X.shape
-    X = X.reshape((X.shape[0], -1))
-    if mean is None and P is None:
-        mean = X.mean(axis=0)
-        X -= mean
-        cov = np.dot(X.T, X) / X.shape[0]
-        D, V = np.linalg.eig(cov)
-        reg = np.mean(D)
-        P = V.dot(np.diag(np.sqrt(1 / (D + reg)))).dot(V.T)
-        X = X.dot(P)
-        X = X.reshape(raw_shape)
-        return X, mean, P
-    else:
-        X -= mean
-        X = X.dot(P)
-        X = X.reshape(raw_shape)
-        return X
+    return X, mean, P

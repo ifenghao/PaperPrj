@@ -8,7 +8,7 @@ from util import *
 
 __all__ = ['add_noise_decomp']
 
-splits = 2
+splits = 1
 
 
 # 统一X的输入维度(batches,orows,ocols,filter_size,filter_size)

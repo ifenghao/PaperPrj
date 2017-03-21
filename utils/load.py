@@ -139,13 +139,22 @@ def mnist_vary(name, onehot=False):
     elif name == 'backimagerotation':
         train_file = os.path.join(data_dir, 'mnist_rotation_back_image_new', 'train.mat')
         test_file = os.path.join(data_dir, 'mnist_rotation_back_image_new', 'test.mat')
+    elif name == 'rect':
+        train_file = os.path.join(data_dir, 'rectangles', 'train.mat')
+        test_file = os.path.join(data_dir, 'rectangles', 'test.mat')
+    elif name == 'rectimage':
+        train_file = os.path.join(data_dir, 'rectangles_images', 'train.mat')
+        test_file = os.path.join(data_dir, 'rectangles_images', 'test.mat')
+    elif name == 'convex':
+        train_file = os.path.join(data_dir, 'convex', 'train.mat')
+        test_file = os.path.join(data_dir, 'convex', 'test.mat')
     else:
         raise ValueError('not found')
     tr_data = sio.loadmat(train_file)
     te_data = sio.loadmat(test_file)
-    tr_X = tr_data['train'][:, :-1].reshape(-1, 1, 28, 28)
+    tr_X = tr_data['train'][:, :-1].reshape(-1, 1, 28, 28).transpose((0, 1, 3, 2))
     tr_y = tr_data['train'][:, -1]
-    te_X = te_data['test'][:, :-1].reshape(-1, 1, 28, 28)
+    te_X = te_data['test'][:, :-1].reshape(-1, 1, 28, 28).transpose((0, 1, 3, 2))
     te_y = te_data['test'][:, -1]
     if onehot:
         tr_y = one_hot(tr_y, 10)

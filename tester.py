@@ -7,6 +7,7 @@ import numpy as np
 import cPickle
 import os
 import utils
+from copy import copy
 
 # size=50
 # batchSize=3
@@ -596,7 +597,7 @@ import utils
 #     return n_jobs, [0] + starts.tolist()
 #
 #
-# def job(inputX, func, n_hidden, filter_size, stride, pool_size):
+# def train_lin_job(inputX, func, n_hidden, filter_size, stride, pool_size):
 #     batches, channels, rows, cols = inputX.shape
 #     _, _, orows, ocols = utils.basic.conv_out_shape((batches, channels, rows, cols),
 #                                                       (n_hidden, channels, filter_size, filter_size),
@@ -614,7 +615,7 @@ import utils
 
 # n_jobs, starts = partition_channels(inputX.shape[1], -1)
 # result = Parallel(n_jobs=n_jobs)(
-#     delayed(job)(inputX[:, starts[i]:starts[i + 1], :, :], self._get_beta,
+#     delayed(train_lin_job)(inputX[:, starts[i]:starts[i + 1], :, :], self._get_beta,
 #                  self.n_hidden, self.filter_size, self.stride, self.pool_size)
 #     for i in xrange(n_jobs))
 
@@ -1108,11 +1109,10 @@ import utils
 #         #     print x[b][ch].reshape((23,23)).astype(int)
 
 
-x = 20
-for i in range(5):
-    x = int(float(x) / 5.5)
-    print x
-
+# x = 20
+# for i in range(5):
+#     x = int(float(x) / 5.5)
+#     print x
 
 # from theano.sandbox.neighbours import images2neibs
 # from lasagne.theano_extensions.padding import pad as lasagnepad
@@ -1519,4 +1519,810 @@ for i in range(5):
 # x=add_mn_array_orient(x, 0, 1, 0.3, ((5,5),), 0.8, 0.5, 'patch')
 # pass
 
-print np.arange(4,6.5,1)
+# from numpy.linalg import solve
+# Hmat=np.random.randn(20,10)
+# Tmat=np.random.randn(20,5)
+# beta1 = np.dot(Hmat.T, solve(np.dot(Hmat, Hmat.T)+ np.eye(20)/1e6, Tmat))
+# beta2 = solve(np.dot(Hmat.T, Hmat)+np.eye(10)/1e6, np.dot(Hmat.T, Tmat))
+# beta3 = np.dot(Hmat.T, solve(np.dot(Hmat, Hmat.T), Tmat))
+# beta4 = solve(np.dot(Hmat.T, Hmat), np.dot(Hmat.T, Tmat))
+# print beta1, beta2, beta3, beta4
+# print Hmat.dot(beta1),Hmat.dot(beta2),Hmat.dot(beta3),Hmat.dot(beta4)
+
+
+# x1=np.random.randn(1,10)
+# y1=np.random.randn(10,1)
+#
+# x2=np.random.randn(1,10)
+# y2=np.random.randn(10,1)
+#
+# print x1.dot(y1)*x2.dot(y2)
+# print x1.dot(y1.dot(y2.T)).dot(x2.T)
+
+# x=np.random.randn(2,7)
+# w=np.random.randn(4,2)
+#
+# h=w.dot(x)
+#
+# hh=h.dot(h.T)
+# print hh
+# xx=x.dot(x.T)
+# hh1=np.zeros((4,4))
+# for i in range(4):
+#     for j in range(4):
+#         hh1[i,j]=w[i,:].dot(xx).dot(w[j,:].T)
+# print hh1
+# ww=np.zeros((w.shape[0],w.shape[1]*w.shape[0]))
+# for i in range(w.shape[0]):
+#     ww[i,i*w.shape[1]:(i+1)*w.shape[1]]=w[i,:]
+# hh2=w.dot(np.tile(xx,(1,4))).dot(ww.T)
+# print hh2
+#
+# xh=x.dot(h.T)
+# print xh
+# xx1=np.zeros((x.shape[0],x.shape[0]))
+# for i in range(x.shape[0]):
+#     xx1[i,:]=x[i,:].dot(x.T)
+# xh1=xx1.dot(w.T)
+# print xh1
+
+# x=np.random.randn(7,2)
+# w=np.random.randn(2,4)
+#
+# h=x.dot(w)
+#
+# hh=h.T.dot(h)
+# print hh
+# xx=x.T.dot(x)
+# Q = None
+# left = np.dot(w.T, xx)
+# for i in xrange(4):
+#     right = np.dot(left, w[:, [i]])
+#     Q = np.concatenate((Q, right), axis=1) if Q != None else right
+# print Q
+
+# from numpy.linalg import solve
+# class mDAELMLayer(object):
+#     def __init__(self, C, n_hidden, p_noise):
+#         self.C = C
+#         self.n_hidden = n_hidden
+#         self.p_noise = p_noise
+#
+#     def _get_beta(self, inputX):
+#         n_features = inputX.shape[1]
+#         S_X = np.dot(inputX.T, inputX)
+#         q_noise = np.ones((n_features, 1)) * (1 - self.p_noise)
+#         q_noise[-1] = 1.
+#         q1 = np.dot(q_noise, q_noise.T)
+#         diag_idx = np.diag_indices(n_features - 1)
+#         q1[diag_idx] = 1 - self.p_noise
+#         S_X_noise1 = S_X * q1
+#         W = np.random.normal(loc=0, scale=1., size=(n_features, self.n_hidden))
+#         Q = None
+#         left = np.dot(W.T, S_X_noise1)
+#         for i in xrange(self.n_hidden):
+#             right = np.dot(left, W[:, [i]])
+#             Q = np.concatenate((Q, right), axis=1) if Q != None else right
+#         Q *= 0.25
+#         diag_idx = np.diag_indices_from(Q)
+#         Q[diag_idx] *= 2
+#         q2 = np.tile(q_noise.T, (n_features, 1))
+#         S_X_noise2 = S_X * q2
+#         P = np.dot(W.T, S_X_noise2) * 0.5
+#         beta = solve(np.eye(self.n_hidden) / self.C + Q, P)
+#         return beta.T
+#
+#     def get_train_output_for(self, inputX):
+#         n_samples, n_features = inputX.shape
+#         bias = np.ones((n_samples, 1), dtype=float)
+#         inputX = np.hstack((inputX, bias))
+#         self.beta = self._get_beta(inputX)
+#         output = np.dot(inputX, self.beta)
+#         # output = relu(output)
+#         return output
+#
+#     def get_test_output_for(self, inputX):
+#         n_samples, n_features = inputX.shape
+#         bias = np.ones((n_samples, 1), dtype=float)
+#         inputX = np.hstack((inputX, bias))
+#         output = np.dot(inputX, self.beta)
+#         # output = relu(output)
+#         return output
+#
+#
+# obj = mDAELMLayer(1e5, 4, 0.2)
+# X = np.random.randn(7, 2)
+# y = obj.get_train_output_for(X)
+# print y
+
+
+# def dottrans_decomp(X, splits=(1, 1)):
+#     rows, cols = X.shape
+#     rsplit, csplit = splits
+#     assert rows % rsplit == 0 and cols % csplit == 0
+#     prows = rows / rsplit
+#     pcols = cols / csplit
+#     out = np.zeros((rows, rows), dtype=float)
+#     for j in xrange(csplit):
+#         col_list = [X[i * prows:(i + 1) * prows, j * pcols:(j + 1) * pcols] for i in xrange(rsplit)]
+#         for i in xrange(rsplit):
+#             for k in xrange(i, rsplit):
+#                 part_dot = np.dot(col_list[i], col_list[k].T)
+#                 out[i * prows:(i + 1) * prows, k * prows:(k + 1) * prows] += part_dot
+#                 if i != k:
+#                     out[k * prows:(k + 1) * prows, i * prows:(i + 1) * prows] += part_dot.T
+#     return out
+#
+# def dot_decomp(X, Y, splits=1):
+#     Xrows, Xcols = X.shape
+#     Yrows, Ycols = Y.shape
+#     assert Xcols % splits == 0 and Yrows % splits == 0
+#     psize = Xcols / splits
+#     out = np.zeros((Xrows, Ycols), dtype=float)
+#     for i in xrange(splits):
+#         part_dot = np.dot(X[:, i * psize:(i + 1) * psize], Y[i * psize:(i + 1) * psize, :])
+#         out += part_dot
+#     return out
+#
+# # X=np.random.randn(10, 30)
+# # a=X.dot(X.T)
+# # b=dottrans_decomp(X, (5,5))
+# # print np.allclose(a,b,1e-15,1e-15), a,b
+#
+# X=np.random.randn(10, 30)
+# Y=np.random.randn(30, 20)
+# a=X.dot(Y)
+# b=dot_decomp(X,Y,5)
+# print np.allclose(a,b,1e-15,1e-15), a,b
+
+# import heapq
+
+# def push_active_2d(hp, x, x_probs, y, y_probs, pos, x_active, y_active):
+#     z = x[pos[0]] + y[pos[1]]
+#     prob = x_probs[pos[0]] * y_probs[pos[1]]
+#     heapq.heappush(hp, (z, prob, pos))
+#     x_active[pos[0]] = 1
+#     y_active[pos[1]] = 1
+#
+#
+# def pop_update_2d(hp, x, x_probs, y, y_probs, x_active, y_active):
+#     z, prob, pos = heapq.heappop(hp)
+#     x_active[pos[0]] = 0
+#     y_active[pos[1]] = 0
+#     new_pos = (pos[0] + 1, pos[1])
+#     if new_pos[0] < len(x) and x_active[new_pos[0]] == 0 and y_active[new_pos[1]] == 0:
+#         push_active_2d(hp, x, x_probs, y, y_probs, new_pos, x_active, y_active)
+#     new_pos = (pos[0], pos[1] + 1)
+#     if new_pos[1] < len(y) and x_active[new_pos[0]] == 0 and y_active[new_pos[1]] == 0:
+#         push_active_2d(hp, x, x_probs, y, y_probs, new_pos, x_active, y_active)
+#     return z, prob
+#
+#
+# def moving_heap_2d(x, x_probs, y, y_probs):  # x,y都是升序排列
+#     hp = []
+#     z = []
+#     z_probs = []
+#     x_active = np.zeros(len(x))
+#     y_active = np.zeros(len(y))
+#     push_active_2d(hp, x, x_probs, y, y_probs, (0, 0), x_active, y_active)
+#     while len(hp) != 0:
+#         new_z, prob = pop_update_2d(hp, x, x_probs, y, y_probs, x_active, y_active)
+#         if len(z) == 0:
+#             z.append(new_z)
+#             z_probs.append(prob)
+#             pre_z = new_z
+#         else:
+#             if np.allclose(pre_z, new_z):  # 相同的元素概率合并
+#                 z_probs[-1] += prob
+#             else:
+#                 z.append(new_z)
+#                 z_probs.append(prob)
+#                 pre_z = new_z
+#     return z, z_probs
+#
+#
+# def push_active_md(hp, x_list, pos, x_active):
+#     z = 0.
+#     prob = 1.
+#     for i, x in zip(pos, x_list):
+#         z += x[0][i]
+#         prob *= x[1][i]
+#     heapq.heappush(hp, (z, prob, pos))
+#     for i, active in zip(pos, x_active):
+#         active[i] = 1
+#
+#
+# def isinactive(pos, x_active):
+#     for i, active in zip(pos, x_active):
+#         if active[i] == 1:
+#             return False
+#     return True
+#
+#
+# def isinbound(pos, x_list):
+#     for i in xrange(len(pos)):
+#         if pos[i] >= len(x_list[i][0]):
+#             return False
+#     return True
+#
+#
+# def gen_pos(ndim):
+#     pos_list = []
+#
+#     def dfs(lst):
+#         if len(lst) == ndim:
+#             pos_list.append(lst)
+#         else:
+#             for i in xrange(2):
+#                 new_lst = copy(lst)
+#                 new_lst.append(i)
+#                 dfs(new_lst)
+#
+#     dfs([])
+#     return pos_list
+#
+#
+# def pop_update_md(hp, x_list, x_active):
+#     z, prob, pos = heapq.heappop(hp)
+#     for i, active in zip(pos, x_active):
+#         active[i] = 0
+#     all_pos = gen_pos(len(x_list))[1:-1]
+#     for i, new_pos in enumerate(all_pos):
+#         if isinbound(new_pos, x_list) and isinactive(new_pos, x_active):
+#             push_active_md(hp, x_list, new_pos, x_active)
+#     return z, prob
+#
+#
+# def moving_heap_md(x_list):  # 升序排列
+#     hp = []
+#     z = []
+#     z_probs = []
+#     ndim = len(x_list)
+#     x_active = []
+#     for i in xrange(ndim):
+#         x_active.append(np.zeros(len(x_list[i][0])))
+#     push_active_md(hp, x_list, [0, ] * ndim, x_active)
+#     while len(hp) != 0:
+#         new_z, prob = pop_update_md(hp, x_list, x_active)
+#         if len(z) == 0:
+#             z.append(new_z)
+#             z_probs.append(prob)
+#             pre_z = new_z
+#         else:
+#             if np.allclose(pre_z, new_z):  # 相同的元素概率合并
+#                 z_probs[-1] += prob
+#             else:
+#                 z.append(new_z)
+#                 z_probs.append(prob)
+#                 pre_z = new_z
+#     return z, z_probs
+#
+#
+# x = [-3, -1, 2, 6, 8]
+# x_probs = [0.15, 0.25, 0.1, 0.3, 0.2]
+# y = [-2, 1, 5, 8]
+# y_probs = [0.2, 0.1, 0.3, 0.4]
+# w = [-4, -2, 0, 4, 8]
+# w_probs = [0.15, 0.25, 0.1, 0.3, 0.2]
+# z, z_probs = moving_heap_md([[x, x_probs], [y, y_probs], [w, w_probs]])
+# print z, z_probs
+#
+# z, z_probs = moving_heap_2d(x, x_probs, y, y_probs)
+# u, u_probs = moving_heap_2d(z, z_probs, w, w_probs)
+# print u, u_probs
+
+# from copy import copy
+# depth=10
+# def dfs(lst):
+#     if len(lst)==depth:
+#         print lst
+#     else:
+#         for i in xrange(2):
+#             new_lst = copy(lst)
+#             new_lst.append(i)
+#             dfs(new_lst)
+#
+# dfs([])
+
+# def combine(ndim_list):
+#     depth = len(ndim_list)
+#     idx_list = []
+#
+#     def dfs(lst):
+#         idim = len(lst)
+#         if idim == depth:
+#             idx_list.append(lst)
+#         else:
+#             for i in xrange(ndim_list[idim]):
+#                 new_lst = copy(lst)
+#                 new_lst.append(i)
+#                 dfs(new_lst)
+#
+#     dfs([])
+#     return idx_list
+#
+#
+# def brute_force(x_lists, x_probs_lists):
+#     ndim_list = np.array(map(lambda x: len(x), x_lists))
+#     idx_list = combine(ndim_list)
+#     idx_iter = iter(idx_list)
+#     counter = np.zeros(len(x_lists))
+#     positive_prob = 0
+#     while sum(np.array(ndim_list) - np.array(counter)-1) >= 0:
+#         z = 0
+#         counter = idx_iter.next()
+#         for num, idx in enumerate(counter):
+#             z += x_lists[num][idx]
+#         if z > 0:
+#             z_prob = 1
+#             for num, idx in enumerate(counter):
+#                 z_prob *= x_probs_lists[num][idx]
+#             positive_prob += z_prob
+#             print positive_prob
+#     return positive_prob
+#
+# x = [-3, -1, 2, 6, 8]
+# x_probs = [0.15, 0.25, 0.1, 0.3, 0.2]
+# y = [-2, 1, 5, 8]
+# y_probs = [0.2, 0.1, 0.3, 0.4]
+# print brute_force([x,y],[x_probs,y_probs])
+
+def bit_add(bit, result, ndim_list):
+    if bit <0:
+        return
+    result[bit]+=1
+    if result[bit]>=ndim_list[bit]:
+        result[bit]=0
+        bit_add(bit - 1, result, ndim_list)
+
+
+def combine_gen(ndim_list):
+    nbit = len(ndim_list)
+    result = [0,]*nbit
+    while True:
+        yield result
+        bit_add(nbit - 1, result, ndim_list)
+        if sum(result) == 0: break
+#
+# # gen=combine_gen([2,3,4,5])
+# # for i,num in enumerate(gen):
+# #     print i,num
+#
+# def brute_force(x_lists, x_probs_lists):
+#     ndim_list = map(lambda x: len(x), x_lists)
+#     idx_list_gen=combine_gen(ndim_list)
+#     positive_prob = 0
+#     for idx_list in idx_list_gen:
+#         z = 0
+#         for num, idx in enumerate(idx_list):
+#             z += x_lists[num][idx]
+#         if z > 0:
+#             z_prob = 1
+#             for num, idx in enumerate(idx_list):
+#                 z_prob *= x_probs_lists[num][idx]
+#             positive_prob += z_prob
+#             # print positive_prob
+#     return positive_prob
+#
+# def depth_first(x_lists, prob):
+#     ndim = len(x_lists)
+#     global positive_prob
+#     positive_prob = 0
+#
+#     def dfs(x_sum, n_retain, idim):
+#         global positive_prob
+#         if idim == ndim:
+#             if x_sum > 0:
+#                 positive_prob += ((1-prob)**n_retain)*(prob**(ndim-n_retain))
+#         else:
+#             for i, x in enumerate(x_lists[idim]):
+#                 new_sum = x_sum + x
+#                 new_retain=n_retain+1 if i==0 else n_retain
+#                 dfs(new_sum, new_retain, idim + 1)
+#
+#     dfs(0., 0, 0)
+#     return positive_prob
+#
+# x = [-3, -1, 2, 6, 8]
+# x_probs = [0.15, 0.25, 0.1, 0.3, 0.2]
+# y = [-2, 1, 5, 8]
+# y_probs = [0.2, 0.1, 0.3, 0.4]
+# print depth_first([x,y],[x_probs,y_probs])
+#
+# x_list=[]
+# x_probs_list=[]
+# for i in range(25):
+#     x_list.append([np.random.normal(), 0])
+#     x_probs_list.append([0.8, 0.2])
+#
+# import time
+# start=time.time()
+# print depth_first(x_list, 0.2)
+# end1=time.time()
+# print end1-start
+# print brute_force(x_list, x_probs_list)
+# end2=time.time()
+# print end2-end1
+#
+# from scipy import stats
+# xx=[]
+# for xl in x_list:
+#     xx.append(xl[0])
+# xx=np.array(xx)
+# mu=np.sum(xx)*0.8
+# sigma=np.sqrt(np.sum(xx**2)*0.8*0.2)
+# print 1-stats.norm.cdf(-mu/sigma)
+
+# from scipy import stats
+# def relu_probs_mn(X, W, p_noise):
+#     n_feature, n_hidden = W.shape
+#     hidden_positive_prob = None
+#     for i in xrange(n_hidden):
+#         X_hidden = X * W[:, i]
+#         mu = np.sum(X_hidden, axis=1) * (1. - p_noise)
+#         sigma = np.sqrt(np.sum(X_hidden ** 2, axis=1) * (1. - p_noise) * p_noise)
+#         col_positive_prob = 1. - stats.norm.cdf(-mu / sigma)
+#         hidden_positive_prob = np.concatenate([hidden_positive_prob, col_positive_prob[:, None]], axis=1) \
+#             if hidden_positive_prob is not None else col_positive_prob[:, None]
+#     return hidden_positive_prob
+#
+# x=np.random.randn(100, 10)
+# w=np.random.randn(10,20)
+# print relu_probs_mn(x,w,0.2)
+
+# def design_Q_noise(n_feature, p_noise):
+#     q = np.ones((n_feature, 1)) * (1 - p_noise)
+#     q[-1] = 1.
+#     q_noise = np.dot(q, q.T)
+#     diag_idx = np.diag_indices(n_feature - 1)
+#     q_noise[diag_idx] = 1 - p_noise
+#     return q_noise
+#
+#
+# def design_Q_mn_gpu(X, W, P_positive, p_noise):
+#     n_feature, n_hidden = W.shape
+#     Q_noise = design_Q_noise(n_feature, p_noise)
+#     Q = np.zeros((n_hidden, n_hidden), dtype=float)
+#     for i in xrange(n_hidden):
+#         for j in xrange(i, n_hidden):
+#             if i == j:
+#                 P_col = np.repeat(P_positive[:, [j]], n_feature, axis=1)
+#                 S_X = np.dot(X.T, X * P_col)
+#                 S_X *= Q_noise
+#                 Q[i, j] = W[:, [i]].T.dot(S_X).dot(W[:, j])
+#             else:
+#                 P_row = np.repeat(P_positive[:, [i]].T, n_feature, axis=0)
+#                 P_col = np.repeat(P_positive[:, [j]], n_feature, axis=1)
+#                 S_X = np.dot(X.T * P_row, X * P_col)
+#                 S_X *= Q_noise
+#                 Q[i, j] = W[:, [i]].T.dot(S_X).dot(W[:, j])
+#                 Q[j, i] = Q[i, j]
+#     return Q
+#
+#
+# def design_P_noise(n_feature, p_noise):
+#     q = np.ones((n_feature, 1)) * (1 - p_noise)
+#     q[-1] = 1.
+#     q_noise = np.tile(q.T, (n_feature, 1))
+#     return q_noise
+#
+#
+# def design_P_mn_gpu(X, W, P_positive, p_noise):
+#     n_batch, n_feature = X.shape
+#     n_feature, n_hidden = W.shape
+#     q_noise = design_P_noise(n_feature, p_noise)
+#     P = np.zeros((n_feature, n_hidden), dtype=float)
+#     for i in xrange(n_batch):
+#         X_row = np.repeat(X[[i], :], n_feature, axis=0)
+#         X_col = np.repeat(X[[i], :].T, n_feature, axis=1)
+#         P_row = np.repeat(P_positive[[i], :], n_feature, axis=0)
+#         P += np.dot(X_col * X_row * q_noise, W * P_row)
+#     return P
+#
+# x=np.repeat(np.arange(7)[:,None],2,axis=1)
+# x=np.hstack([x,np.ones((7,1))])
+# w=np.ones((3,4))
+# p=np.zeros((7,4))
+# for i in range(7):
+#     for j in range(4):
+#         p[i,j]=(i+j)*0.05
+#
+# print design_Q_mn_gpu(x,w,p,0.2)
+# print design_P_mn_gpu(x,w,p,0.2)
+
+# from sklearn.externals.joblib import Parallel, delayed
+#
+# # def one_job(x):
+# #     x+=1
+# #     return x
+# #
+# # x=np.zeros((10,10))
+# # px=Parallel(n_jobs=2, verbose=1)(
+# #     delayed(one_job)(x[i*5:(i+1)*5]) for i in range(2))
+# # print sum(px)
+#
+# def _partition_estimators(n_estimators, n_jobs):
+#     """Private function used to partition estimators between jobs."""
+#     # Partition estimators between jobs
+#     n_estimators_per_job = (n_estimators // n_jobs) * np.ones(n_jobs,
+#                                                               dtype=np.int)
+#     n_estimators_per_job[:n_estimators % n_jobs] += 1
+#     starts = np.cumsum(n_estimators_per_job)
+#
+#     return n_jobs, n_estimators_per_job.tolist(), [0] + starts.tolist()
+#
+# print _partition_estimators(100,12)
+
+# x=np.zeros((10,10))
+# y=np.ones((10,10))
+# for i in range(10):
+#     tmp=copy(x[i,:])
+#     # tmp = x[i, :]
+#     y=y+i
+#     x[i,:]=y[i,:]
+#     x[i,:]=tmp
+#
+# print x
+
+# from sklearn.externals.joblib import Parallel, delayed
+# import time
+# def func(n):
+#     time.sleep(5-n)
+#     return n
+#
+# result=Parallel(n_jobs=-1)(
+#     delayed(func)(n) for n in range(4))
+# print result
+
+# from scipy.linalg import orth
+#
+# def orthonormalize(filters):
+#     ndim = filters.ndim
+#     if ndim != 2:
+#         filters = np.expand_dims(filters, axis=0)
+#     rows, cols = filters.shape
+#     if rows >= cols:
+#         orthonormal = orth(filters)
+#     else:
+#         orthonormal = orth(filters.T).T
+#     if ndim != 2:
+#         orthonormal = np.squeeze(orthonormal, axis=0)
+#     return orthonormal
+#
+# def add_mn(X, percent=0.5):
+#     retain_prob = 1. - percent
+#     binomial = np.random.uniform(low=0., high=1., size=X.shape)
+#     binomial = np.asarray(binomial < retain_prob, dtype=float)
+#     return X * binomial
+#
+# def add_gs(X, scale=100., std=None):
+#     if std is None:
+#         Xmin, Xmax = np.min(X), np.max(X)
+#         std = (Xmax - Xmin) / (2. * scale)
+#     normal = np.random.normal(loc=0, scale=std, size=X.shape)
+#     X += normal
+#     return X
+#
+# w=np.random.randn(1000)
+# # x=np.random.randn(1000)
+# # w=orthonormalize(w)
+# # w=w/1000
+# result=[]
+# for i in range(1000):
+#     x = np.random.randn(1000)
+#     # y = copy(x)
+#     # y=add_gs(y, 0.5)
+#     result.append(np.dot(x,w))
+#
+# print result
+# mean=np.mean(result)
+# print mean, sum(map(lambda x:x>0, result))
+
+# import multiprocessing
+# import time
+#
+#
+# def func(msg):
+#     for i in xrange(3):
+#         print msg
+#         time.sleep(1)
+#     return "done " + msg
+#
+#
+# if __name__ == "__main__":
+#     pool = multiprocessing.Pool(processes=4)
+#     result = []
+#     for i in xrange(10):
+#         msg = "hello %d" % (i)
+#         result.append(pool.apply_async(func, (msg,)))
+#     pool.close()
+#     pool.join()
+#     for res in result:
+#         print res.get()
+#     print "Sub-process(es) done."
+
+# x=np.arange(25).reshape((5,5)).astype(theano.config.floatX)
+# t1=T.matrix()
+# t2=t1+1
+# diag=T.arange(t2.shape[0])
+# tmp=t2[diag,diag]
+# w=T.set_subtensor(tmp, tmp/10)
+# func=theano.function([t1],[w, t2], allow_input_downcast=True)
+# print func(x)
+
+# def design_Q_mn(X, W, P_positive):
+#     n_batch, n_feature = X.shape
+#     n_feature, n_hidden = W.shape
+#     Q = 0.  # np.zeros((n_hidden, n_hidden), dtype=float)
+#     for i in xrange(n_batch):
+#         X_row = X[[i], :]
+#         S_X = np.dot(X_row.T, X_row)
+#         P_row = P_positive[i, :]
+#         W_p = W * P_row
+#         half_p = np.dot(W_p.T, S_X)
+#         Q_i = np.dot(half_p, W_p)
+#         Q_i_diag = np.sum(half_p * W.T, axis=1)
+#         diag_idx = np.diag_indices(n_hidden)
+#         Q_i[diag_idx] = Q_i_diag
+#         Q += Q_i
+#     return Q
+#
+# def design_Q_gs(X, W, P_positive):  # gs和mn相比仅仅不需要add_Q_noise
+#     n_batch, n_feature = X.shape
+#     n_feature, n_hidden = W.shape
+#     Q = 0.  # np.zeros((n_hidden, n_hidden), dtype=float)
+#     for i in xrange(n_batch):
+#         X_row = X[[i], :]
+#         S_X = np.dot(X_row.T, X_row)
+#         P_row = P_positive[i, :]
+#         W_p = W * P_row
+#         half_p = np.dot(W_p.T, S_X)
+#         half_nop = np.dot(W.T, S_X)
+#         Q_i = []
+#         for j in xrange(n_hidden):  # 要避免除以概率值,有可能很小甚至接近于0
+#             half_copy = copy(half_p[j, :])  # 保留原值
+#             half_p[j, :] = half_nop[j, :]  # 每次替换一行,对应于最终结果的对角线上
+#             Q_i_col = np.dot(half_p, W_p[:, [j]])
+#             Q_i.append(Q_i_col)
+#             half_p[j, :] = half_copy  # 恢复原值
+#         Q_i = np.concatenate(Q_i, axis=1)
+#         Q += Q_i
+#     return Q
+#
+# X=np.random.randn(20,10)
+# W=np.random.rand(10, 15)
+# P=np.random.rand(20, 15)
+# print design_Q_mn(X,W,P)-design_Q_gs(X,W,P)
+
+# import sys
+# sys.path.append('/home/zfh/downloadcode/liblinear-2.1/python')
+# from liblinear.python.liblinearutil import *
+# # y, x = [1,-1], [[1,0,1], [-1,0,-1]]
+# y,x=np.array([1,-1]), np.array([[1,0,1], [-1,0,-1]])
+# prob  = problem(y.tolist(), x.tolist())
+# param = parameter('-s 0 -c 4 -B 1')
+# m = train(prob, param)
+
+# import sys
+# sys.path.append('/home/zfh/downloadcode/liblinear-2.1/python')
+# import liblinearutil
+# class Classifier_SVMlin():
+#     def __init__(self, C):
+#         self.C = C
+#
+#     def get_train_acc(self, inputX, inputy):
+#         inputX, inputy = inputX.tolist(), inputy.tolist()
+#         prob = liblinearutil.problem(inputy, inputX)
+#         param = liblinearutil.parameter('-q -s 2 -B 1.0 -c ' + str(self.C))
+#         self.clf = liblinearutil.train(prob, param)
+#         _, p_acc, _ = liblinearutil.predict(inputy, inputX, self.clf)
+#         return p_acc[0]
+#
+#     def get_test_acc(self, inputX, inputy):
+#         inputX, inputy = inputX.tolist(), inputy.tolist()
+#         _, p_acc, _ = liblinearutil.predict(inputy, inputX, self.clf)
+#         return p_acc[0]
+#
+# clf=Classifier_SVMlin(1)
+# y,x=np.random.randint(0,10, 100), np.random.rand(100,4)
+# print clf.get_train_acc(x,y)
+# print clf.get_test_acc(x,y)
+
+# def add_Q_noise(S_X, p_noise):
+#     n_feature = S_X.shape[0]
+#     S_X *= (1. - p_noise) ** 2
+#     diag_idx = np.diag_indices(n_feature - 1)
+#     S_X[diag_idx] /= 1. - p_noise
+#     S_X[-1, :] /= 1. - p_noise
+#     S_X[:, -1] /= 1. - p_noise
+#     return S_X
+#
+# x=np.arange(100).astype(float).reshape((10,10))
+# print x
+# y=add_Q_noise(x, 0.2)
+# print x,y
+
+# def deploy(batch, n_jobs):
+#     dis_batch = (batch // n_jobs) * np.ones(n_jobs, dtype=np.int)
+#     dis_batch[:batch % n_jobs] += 1
+#     starts = np.cumsum(dis_batch)
+#     starts = [0] + starts.tolist()
+#     return starts
+#
+# def dottrans_decomp(X, splits=(1, 1)):
+#     rows, cols = X.shape
+#     rsplit, csplit = splits
+#     assert rows % rsplit == 0 and cols % csplit == 0
+#     prows = rows / rsplit
+#     pcols = cols / csplit
+#     out = np.zeros((rows, rows), dtype=float)
+#     for j in xrange(csplit):
+#         col_list = [X[i * prows:(i + 1) * prows, j * pcols:(j + 1) * pcols] for i in xrange(rsplit)]
+#         for i in xrange(rsplit):
+#             for k in xrange(i, rsplit):
+#                 part_dot = np.dot(col_list[i], col_list[k].T)
+#                 out[i * prows:(i + 1) * prows, k * prows:(k + 1) * prows] += part_dot
+#                 if i != k:
+#                     out[k * prows:(k + 1) * prows, i * prows:(i + 1) * prows] += part_dot.T
+#     return out
+#
+#
+# # compute X dot Y
+# def dot_decomp_dim1(X, Y, splits=1):
+#     size = X.shape[0]
+#     starts = deploy(size, splits)
+#     result = None
+#     for i in xrange(splits):
+#         tmp = np.dot(X[starts[i]:starts[i + 1]], Y)
+#         result = np.concatenate([result, tmp], axis=0) if result is not None else tmp
+#     return result
+#
+#
+# def dot_decomp_dim2(X, Y, splits=1):
+#     Xrows, Xcols = X.shape
+#     Yrows, Ycols = Y.shape
+#     assert Xcols == Yrows
+#     starts = deploy(Xcols, splits)
+#     out = np.zeros((Xrows, Ycols), dtype=float)
+#     for i in xrange(splits):
+#         part_dot = np.dot(X[:, starts[i]:starts[i + 1]], Y[starts[i]:starts[i + 1], :])
+#         out += part_dot
+#     return out
+#
+# x=np.random.randn(20,10)
+# y=np.random.randn(10,5)
+# r1=x.T.dot(x)
+# r2=dottrans_decomp(x.T, splits=(5,5))
+# print r1-r2
+#
+# r3=dot_decomp_dim1(x,y,5)
+# r4=dot_decomp_dim2(x,y,5)
+# r5=x.dot(y)
+# print r5-r3, r5-r4
+
+# def conv_out_shape(inputShape, filterShape, pad, stride, ignore_border=False):
+#     batch, channel, mrows, mcols = inputShape
+#     channelout, channelin, frows, fcols = filterShape
+#     assert channel == channelin
+#     if isinstance(pad, tuple):
+#         rowpad, colpad = pad
+#     else:
+#         rowpad = colpad = pad
+#     if isinstance(stride, tuple):
+#         rowstride, colstride = stride
+#     else:
+#         rowstride = colstride = stride
+#     mrows, mcols = mrows + 2 * rowpad, mcols + 2 * colpad
+#     if not ignore_border:  # 保持下和右的边界
+#         rowrem = (mrows - frows) % rowstride
+#         if rowrem: mrows += rowstride - rowrem
+#         colrem = (mcols - fcols) % colstride
+#         if colrem: mcols += colstride - colrem
+#     orow = (mrows - frows) // rowstride + 1
+#     ocol = (mcols - fcols) // colstride + 1
+#     return batch, channelout, orow, ocol
+#
+# oshape = conv_out_shape((0, 0, 96, 96),
+#                         (0, 0, 5, 5),
+#                         pad=2, stride=4, ignore_border=False)
+# print oshape
